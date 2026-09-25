@@ -1,0 +1,11 @@
+{
+    "schema_version": 2,
+    "commit": "7a5f65a78f02de720d9a9ac4c25435741f3d1715",
+    "indexed_at": "2026-09-25T08:12:00Z",
+    "project": "map-editor-web",
+    "nodes": 255,
+    "edges": 361,
+    "original_size": 1900544,
+    "compressed_size": 54559,
+    "compression_level": 3
+}
