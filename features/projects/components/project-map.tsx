@@ -4,7 +4,7 @@ import { MapboxOverlay } from "@deck.gl/mapbox";
 import type { Layer } from "deck.gl";
 import { layerFactory } from "@muhamadanjar/layers/layer-factory";
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMap } from "maplibre-gl";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { TerraDraw, TerraDrawLineStringMode, TerraDrawPointMode, TerraDrawPolygonMode, TerraDrawRectangleMode, TerraDrawSelectMode } from "terra-draw";
 import { TerraDrawMapLibreGLAdapter } from "terra-draw-maplibre-gl-adapter";
 import { projectGeoJsonUrl } from "../api/projects-api";
@@ -40,13 +40,21 @@ type ProjectMapProps = {
   geofenceGeometry?: FeatureGeometry | null;
   focusGeometry: FeatureGeometry | null;
   workspaceGeometries: FeatureGeometry[];
+  projectFeatures: { id: string; geometry: FeatureGeometry }[];
+  selectedFeatureGeometries: FeatureGeometry[];
   onCoordinate: (coordinate: Position) => void;
   editorSession: number;
   editorMode: MapEditorMode | null;
   onDraftGeometryChange: (geometry: FeatureGeometry | null) => void;
   onEditorModeChange: (mode: MapEditorMode) => void;
+  featureSelectionMode: boolean;
+  selectedFeatureCount: number;
+  onFeatureSelectionModeChange: (active: boolean) => void;
+  onProjectFeatureSelect: (featureId: string | null, additive: boolean) => void;
   tableOpen: boolean;
   onTableToggle: () => void;
+  canDelete: boolean;
+  onDelete: () => void;
   canCut: boolean;
   canMerge: boolean;
   onCut: () => void;
@@ -61,10 +69,14 @@ function asFeatureGeometry(geometry: GeoJSON.Geometry): FeatureGeometry | null {
 }
 
 function geometryToCollection(geometry: FeatureGeometry | null): GeoJSON.FeatureCollection {
-  if (!geometry) return EMPTY_COLLECTION;
+  return geometriesToCollection(geometry ? [geometry] : []);
+}
+
+function geometriesToCollection(geometries: FeatureGeometry[]): GeoJSON.FeatureCollection {
+  if (!geometries.length) return EMPTY_COLLECTION;
   return {
     type: "FeatureCollection",
-    features: [{ type: "Feature", properties: {}, geometry }],
+    features: geometries.map((geometry) => ({ type: "Feature", properties: {}, geometry })),
   } as GeoJSON.FeatureCollection;
 }
 
@@ -102,6 +114,27 @@ function projectLayer(project: Project, revision: number): Layer | null {
   }) as Layer | null;
 }
 
+function featureIdFromPick(
+  info: { object?: unknown; index?: number },
+  projectFeatures: { id: string; geometry: FeatureGeometry }[],
+): string | null {
+  const feature = info.object as { id?: unknown; geometry?: unknown; properties?: { id?: unknown; _id?: unknown } } | undefined;
+  const validIds = new Set(projectFeatures.map((item) => item.id));
+  const candidateIds = [feature?.id, feature?.properties?.id, feature?.properties?._id]
+    .map((value) => typeof value === "number" ? String(value) : value)
+    .filter((value): value is string => typeof value === "string" && validIds.has(value));
+  let featureId: string | undefined = candidateIds[0];
+
+  if (!featureId && feature?.geometry) {
+    const geometrySnapshot = JSON.stringify(feature.geometry);
+    featureId = projectFeatures.find((item) => JSON.stringify(item.geometry) === geometrySnapshot)?.id;
+  }
+  if (!featureId && typeof info.index === "number") {
+    featureId = projectFeatures[info.index]?.id;
+  }
+  return featureId ?? null;
+}
+
 export function ProjectMap({
   project,
   featureRevision,
@@ -111,13 +144,21 @@ export function ProjectMap({
   geofenceGeometry = null,
   focusGeometry,
   workspaceGeometries,
+  projectFeatures,
+  selectedFeatureGeometries,
   onCoordinate,
   editorSession,
   editorMode,
   onDraftGeometryChange,
   onEditorModeChange,
+  featureSelectionMode,
+  selectedFeatureCount,
+  onFeatureSelectionModeChange,
+  onProjectFeatureSelect,
   tableOpen,
   onTableToggle,
+  canDelete,
+  onDelete,
   canCut,
   canMerge,
   onCut,
@@ -133,9 +174,14 @@ export function ProjectMap({
   const drawGeometryTypeRef = useRef<GeometryType | null>(drawGeometryType);
   const draftGeometryRef = useRef(draftGeometry);
   const geofenceRef = useRef(geofenceGeometry);
+  const projectFeaturesRef = useRef(projectFeatures);
+  const selectedFeatureGeometriesRef = useRef(selectedFeatureGeometries);
   const editorModeRef = useRef<MapEditorMode | null>(editorMode);
+  const featureSelectionModeRef = useRef(featureSelectionMode);
+  const shiftKeyPressedRef = useRef(false);
   const onDraftGeometryChangeRef = useRef(onDraftGeometryChange);
   const onEditorModeChangeRef = useRef(onEditorModeChange);
+  const onProjectFeatureSelectRef = useRef(onProjectFeatureSelect);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
 
@@ -145,9 +191,17 @@ export function ProjectMap({
     geometryTypeRef.current = project?.geometry_type ?? null;
     drawGeometryTypeRef.current = drawGeometryType;
     editorModeRef.current = editorMode;
+    featureSelectionModeRef.current = featureSelectionMode;
+    const map = mapRef.current;
+    if (map) {
+      if (featureSelectionMode) map.boxZoom.disable();
+      else map.boxZoom.enable();
+    }
     onDraftGeometryChangeRef.current = onDraftGeometryChange;
     onEditorModeChangeRef.current = onEditorModeChange;
-  }, [drawing, drawGeometryType, editorMode, onCoordinate, onDraftGeometryChange, onEditorModeChange, project?.geometry_type]);
+    onProjectFeatureSelectRef.current = onProjectFeatureSelect;
+    projectFeaturesRef.current = projectFeatures;
+  }, [drawing, drawGeometryType, editorMode, featureSelectionMode, onCoordinate, onDraftGeometryChange, onEditorModeChange, onProjectFeatureSelect, project?.geometry_type, projectFeatures]);
 
   useEffect(() => {
     draftGeometryRef.current = draftGeometry;
@@ -158,6 +212,10 @@ export function ProjectMap({
   }, [geofenceGeometry]);
 
   useEffect(() => {
+    selectedFeatureGeometriesRef.current = selectedFeatureGeometries;
+  }, [selectedFeatureGeometries]);
+
+  useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
     const map = new maplibregl.Map({
@@ -166,9 +224,35 @@ export function ProjectMap({
       center: DEFAULT_VIEW.center,
       zoom: DEFAULT_VIEW.zoom,
     });
+    if (featureSelectionModeRef.current) map.boxZoom.disable();
 
     const overlay = new MapboxOverlay({ interleaved: false, layers: [] });
     map.addControl(overlay as unknown as maplibregl.IControl);
+    const mapCanvas = map.getCanvas();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Shift") shiftKeyPressedRef.current = true;
+    };
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.key === "Shift") shiftKeyPressedRef.current = false;
+    };
+    const handleWindowBlur = () => {
+      shiftKeyPressedRef.current = false;
+    };
+    const handleFeatureSelectionClick = (event: MouseEvent) => {
+      if (!featureSelectionModeRef.current || drawingRef.current || !map.isStyleLoaded()) return;
+      const bounds = mapCanvas.getBoundingClientRect();
+      const picked = overlay.pickObject({
+        x: event.clientX - bounds.left,
+        y: event.clientY - bounds.top,
+        radius: 4,
+      });
+      const featureId = picked?.object ? featureIdFromPick(picked, projectFeaturesRef.current) : null;
+      onProjectFeatureSelectRef.current(featureId, event.shiftKey || shiftKeyPressedRef.current);
+    };
+    window.addEventListener("keydown", handleKeyDown, true);
+    window.addEventListener("keyup", handleKeyUp, true);
+    window.addEventListener("blur", handleWindowBlur);
+    mapCanvas.addEventListener("click", handleFeatureSelectionClick, true);
 
     map.on("load", () => {
       const draw = new TerraDraw({
@@ -240,7 +324,29 @@ export function ProjectMap({
         source: "project-geofence",
         paint: { "line-color": "#67a2c5", "line-width": 2, "line-dasharray": [3, 2] },
       });
-      map.getCanvas().style.cursor = drawingRef.current ? "crosshair" : "";
+      map.addSource("project-selection", { type: "geojson", data: geometriesToCollection(selectedFeatureGeometriesRef.current) });
+      map.addLayer({
+        id: "project-selection-fill",
+        type: "fill",
+        source: "project-selection",
+        filter: ["==", ["geometry-type"], "Polygon"],
+        paint: { "fill-color": "#c0392b", "fill-opacity": 0.22 },
+      });
+      map.addLayer({
+        id: "project-selection-line",
+        type: "line",
+        source: "project-selection",
+        filter: ["any", ["==", ["geometry-type"], "LineString"], ["==", ["geometry-type"], "Polygon"]],
+        paint: { "line-color": "#c0392b", "line-width": 4 },
+      });
+      map.addLayer({
+        id: "project-selection-points",
+        type: "circle",
+        source: "project-selection",
+        filter: ["==", ["geometry-type"], "Point"],
+        paint: { "circle-radius": 9, "circle-color": "#c0392b", "circle-stroke-width": 2, "circle-stroke-color": "#ffffff" },
+      });
+      map.getCanvas().style.cursor = drawingRef.current ? "crosshair" : featureSelectionModeRef.current ? "pointer" : "";
     });
 
     map.on("click", (event) => {
@@ -253,6 +359,11 @@ export function ProjectMap({
     overlayRef.current = overlay;
 
     return () => {
+      window.removeEventListener("keydown", handleKeyDown, true);
+      window.removeEventListener("keyup", handleKeyUp, true);
+      window.removeEventListener("blur", handleWindowBlur);
+      mapCanvas.removeEventListener("click", handleFeatureSelectionClick, true);
+      map.boxZoom.enable();
       drawRef.current?.stop();
       drawRef.current = null;
       overlayRef.current = null;
@@ -288,8 +399,9 @@ export function ProjectMap({
     const source = map.getSource("project-draft") as GeoJSONSource | undefined;
     source?.setData(geometryToCollection(draftGeometry));
     (map.getSource("project-geofence") as GeoJSONSource | undefined)?.setData(geometryToCollection(geofenceGeometry));
-    map.getCanvas().style.cursor = drawing ? "crosshair" : "";
-  }, [draftGeometry, drawing, geofenceGeometry]);
+    (map.getSource("project-selection") as GeoJSONSource | undefined)?.setData(geometriesToCollection(selectedFeatureGeometries));
+    map.getCanvas().style.cursor = drawing ? "crosshair" : featureSelectionMode ? "pointer" : "";
+  }, [draftGeometry, drawing, featureSelectionMode, geofenceGeometry, selectedFeatureGeometries]);
 
   useEffect(() => {
     if (!focusGeometry || !mapRef.current) return;
@@ -350,8 +462,13 @@ export function ProjectMap({
             setCanRedo(drawRef.current?.canRedo() ?? false);
           }}
           onClear={clearEditorDraft}
+          featureSelectionMode={featureSelectionMode}
+          selectedFeatureCount={selectedFeatureCount}
+          onFeatureSelectionModeChange={onFeatureSelectionModeChange}
           tableOpen={tableOpen}
           onTableToggle={onTableToggle}
+          canDelete={canDelete}
+          onDelete={onDelete}
           canCut={canCut}
           canMerge={canMerge}
           onCut={onCut}

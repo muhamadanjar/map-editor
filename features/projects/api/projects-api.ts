@@ -109,6 +109,14 @@ export async function createProjectFeature(
   );
 }
 
+export async function deleteProjectFeature(projectId: string, featureId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/projects/${encodeURIComponent(projectId)}/features/${encodeURIComponent(featureId)}`, {
+    method: "DELETE",
+    cache: "no-store",
+  });
+  if (!response.ok) await readJson(response);
+}
+
 export function projectGeoJsonUrl(projectId: string, revision: number): string {
   return `${API_BASE}/projects/${projectId}/features.geojson?revision=${revision}`;
 }

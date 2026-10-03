@@ -2,7 +2,7 @@
 
 import {
   ChevronDown, Eraser, MapPin, Merge, MousePointer2, Pentagon,
-  RectangleHorizontal, Redo2, Scissors, Table2, Undo2, Waypoints, Wrench,
+  RectangleHorizontal, Redo2, Scissors, Table2, Trash2, Undo2, Waypoints, Wrench,
 } from "lucide-react";
 import { useState, type ComponentType, type ReactNode } from "react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -25,12 +25,17 @@ type EditingToolbarProps = {
   hasDraft: boolean;
   canUndo: boolean;
   canRedo: boolean;
+  featureSelectionMode: boolean;
+  selectedFeatureCount: number;
   tableOpen: boolean;
   onModeChange: (mode: MapEditorMode) => void;
   onUndo: () => void;
   onRedo: () => void;
   onClear: () => void;
+  onFeatureSelectionModeChange: (active: boolean) => void;
   onTableToggle: () => void;
+  canDelete: boolean;
+  onDelete: () => void;
   canCut: boolean;
   canMerge: boolean;
   onCut: () => void;
@@ -52,7 +57,7 @@ function ToolbarButton({ label, active = false, disabled = false, onClick, child
   );
 }
 
-export function MapEditingToolbar({ geometryType, activeMode, hasDraft, canUndo, canRedo, tableOpen, onModeChange, onUndo, onRedo, onClear, onTableToggle, canCut, canMerge, onCut, onMerge }: EditingToolbarProps) {
+export function MapEditingToolbar({ geometryType, activeMode, hasDraft, canUndo, canRedo, featureSelectionMode, selectedFeatureCount, tableOpen, onModeChange, onUndo, onRedo, onClear, onFeatureSelectionModeChange, onTableToggle, canDelete, onDelete, canCut, canMerge, onCut, onMerge }: EditingToolbarProps) {
   const [expanded, setExpanded] = useState(false);
   const geometryName = geometryType === "point" ? "titik" : geometryType === "line" ? "garis" : "poligon";
 
@@ -70,9 +75,10 @@ export function MapEditingToolbar({ geometryType, activeMode, hasDraft, canUndo,
           {expanded ? (
             <>
               <span className="h-6 border-l border-black/10" aria-hidden="true" />
-              <ToolbarButton label="Pilih dan edit vertex" active={activeMode === "select"} disabled={!hasDraft} onClick={() => onModeChange("select")}>
+              <ToolbarButton label={hasDraft ? "Pilih dan edit vertex sketsa" : "Pilih Feature tersimpan di peta"} active={hasDraft ? activeMode === "select" : featureSelectionMode} onClick={() => hasDraft ? onModeChange("select") : onFeatureSelectionModeChange(!featureSelectionMode)}>
                 <MousePointer2 className="size-4" aria-hidden="true" />
               </ToolbarButton>
+              {selectedFeatureCount > 0 ? <span aria-live="polite" className="px-2 font-mono text-xs font-semibold text-[#8f2d23]">{selectedFeatureCount} dipilih</span> : null}
               {drawingTools.map(({ mode, label, geometry, Icon }) => {
                 const unavailable = geometry !== geometryType;
                 const disabled = unavailable || hasDraft;
@@ -84,8 +90,9 @@ export function MapEditingToolbar({ geometryType, activeMode, hasDraft, canUndo,
               <ToolbarButton label="Ulangi perubahan sketsa" disabled={!canRedo} onClick={onRedo}><Redo2 className="size-4" aria-hidden="true" /></ToolbarButton>
               <ToolbarButton label="Hapus sketsa aktif" disabled={!hasDraft} onClick={onClear}><Eraser className="size-4 text-[#c0392b]" aria-hidden="true" /></ToolbarButton>
               <span className="h-6 border-l border-black/10" aria-hidden="true" />
+              <ToolbarButton label={canDelete ? "Hapus Feature terpilih" : "Pilih satu atau lebih Feature untuk dihapus"} disabled={!canDelete} onClick={onDelete}><Trash2 className="size-4 text-[#c0392b]" aria-hidden="true" /></ToolbarButton>
               <ToolbarButton label={canCut ? "Potong Feature terpilih" : "Pilih satu Feature Polygon untuk dipotong"} disabled={!canCut} onClick={onCut}><Scissors className="size-4" aria-hidden="true" /></ToolbarButton>
-              <ToolbarButton label={canMerge ? "Gabungkan Feature terpilih" : "Pilih dua atau lebih Feature Polygon untuk digabungkan"} disabled={!canMerge} onClick={onMerge}><Merge className="size-4" aria-hidden="true" /></ToolbarButton>
+              <ToolbarButton label={canMerge ? `Gabungkan ${selectedFeatureCount} Feature terpilih` : "Pilih dua atau lebih Feature Polygon untuk digabungkan"} disabled={!canMerge} onClick={onMerge}><Merge className="size-4" aria-hidden="true" /></ToolbarButton>
             </>
           ) : null}
         </div>

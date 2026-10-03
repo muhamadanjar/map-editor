@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   createProjectFeature,
   cutProjectFeature,
+  deleteProjectFeature,
   deleteProjectGeofence,
   getProjectFeatures,
   getProjectGeofence,
@@ -13,7 +14,8 @@ import {
   ProjectsApiError,
   upsertProjectGeofence,
 } from "../api/projects-api";
-import type { FeatureGeometry, Position, Project, ProjectFeature, ProjectGeofence } from "../types";
+import type { FeatureGeometry, Position, Project } from "../types";
+import { setProjectWorkspaceValue, useProjectWorkspaceStore } from "../stores/project-workspace-store";
 import { geofenceErrorMessage } from "./project-geofence-settings";
 import { FeatureInputDialog } from "./feature-input-dialog";
 import { FeatureTable } from "./feature-table";
@@ -48,60 +50,68 @@ function sortByName(projects: Project[]): Project[] {
 }
 
 export function ProjectWorkspace() {
-  const [projects, setProjects] = useState<Project[]>([]);
+  const projects = useProjectWorkspaceStore((state) => state.projects);
+  const activeProjectId = useProjectWorkspaceStore((state) => state.activeProjectId);
+  const features = useProjectWorkspaceStore((state) => state.features);
+  const featureRevision = useProjectWorkspaceStore((state) => state.featureRevision);
+  const drawing = useProjectWorkspaceStore((state) => state.drawing);
+  const editorMode = useProjectWorkspaceStore((state) => state.editorMode);
+  const editorSession = useProjectWorkspaceStore((state) => state.editorSession);
+  const draftGeometry = useProjectWorkspaceStore((state) => state.draftGeometry);
+  const focusGeometry = useProjectWorkspaceStore((state) => state.focusGeometry);
+  const geofence = useProjectWorkspaceStore((state) => state.geofence);
+  const geofenceDrawing = useProjectWorkspaceStore((state) => state.geofenceDrawing);
+  const geofencePoints = useProjectWorkspaceStore((state) => state.geofencePoints);
+  const selectedFeatureIds = useProjectWorkspaceStore((state) => state.selectedFeatureIds);
+  const featureSelectionMode = useProjectWorkspaceStore((state) => state.featureSelectionMode);
+  const resetWorkspaceStore = useProjectWorkspaceStore((state) => state.reset);
+  const activateProjectData = useProjectWorkspaceStore((state) => state.activateProject);
+  const clearDraftData = useProjectWorkspaceStore((state) => state.clearDraft);
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [projectsError, setProjectsError] = useState<string | null>(null);
-  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
-  const [features, setFeatures] = useState<ProjectFeature[]>([]);
   const [featuresLoading, setFeaturesLoading] = useState(false);
   const [featuresError, setFeaturesError] = useState<string | null>(null);
-  const [featureRevision, setFeatureRevision] = useState(0);
-  const [drawing, setDrawing] = useState(false);
-  const [editorMode, setEditorMode] = useState<MapEditorMode | null>(null);
-  const [editorSession, setEditorSession] = useState(0);
-  const [draftGeometry, setDraftGeometry] = useState<FeatureGeometry | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [pendingProjectId, setPendingProjectId] = useState<string | null>(null);
   const [switchConfirmOpen, setSwitchConfirmOpen] = useState(false);
-  const [focusGeometry, setFocusGeometry] = useState<FeatureGeometry | null>(null);
   const [tableOpen, setTableOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [settings, setSettings] = useState<SettingsState>(null);
-  const [geofence, setGeofence] = useState<ProjectGeofence | null>(null);
   const [geofenceLoading, setGeofenceLoading] = useState(false);
   const [geofenceError, setGeofenceError] = useState<string | null>(null);
-  const [geofenceDrawing, setGeofenceDrawing] = useState(false);
-  const [geofencePoints, setGeofencePoints] = useState<Position[]>([]);
   const [geofenceApplying, setGeofenceApplying] = useState(false);
   const [geofenceRemoving, setGeofenceRemoving] = useState(false);
-  const [selectedFeatureIds, setSelectedFeatureIds] = useState<string[]>([]);
   const [topologyAction, setTopologyAction] = useState<TopologyAction | null>(null);
   const [topologyConfirm, setTopologyConfirm] = useState<TopologyAction | null>(null);
   const [topologySubmitting, setTopologySubmitting] = useState(false);
+  const [featureDeleteConfirm, setFeatureDeleteConfirm] = useState<string[] | null>(null);
+  const [featureDeleting, setFeatureDeleting] = useState(false);
 
   const activeProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId) ?? null,
     [activeProjectId, projects],
   );
 
+  const activeSelection = useMemo(
+    () => selectedFeatureIds.filter((id) => features.some((feature) => feature.id === id)),
+    [features, selectedFeatureIds],
+  );
+
   const clearDraft = useCallback(() => {
-    setDrawing(false);
-    setEditorMode(null);
-    setDraftGeometry(null);
+    clearDraftData();
     setFormValues({});
     setFormError(null);
     setFormOpen(false);
-    setEditorSession((session) => session + 1);
-  }, []);
+  }, [clearDraftData]);
 
   const loadProjects = useCallback(async () => {
     setProjectsLoading(true);
     setProjectsError(null);
     try {
-      setProjects(sortByName(await getProjects()));
+      setProjectWorkspaceValue("projects", sortByName(await getProjects()));
     } catch (error) {
       setProjectsError(error instanceof Error ? error.message : "Daftar Project tidak dapat dimuat.");
     } finally {
@@ -114,8 +124,8 @@ export function ProjectWorkspace() {
     setFeaturesError(null);
     try {
       const nextFeatures = await getProjectFeatures(projectId, signal);
-      setFeatures(nextFeatures);
-      setFeatureRevision((revision) => revision + 1);
+      setProjectWorkspaceValue("features", nextFeatures);
+      setProjectWorkspaceValue("featureRevision", (revision) => revision + 1);
     } catch (error) {
       if ((error as Error).name !== "AbortError") {
         setFeaturesError(error instanceof Error ? error.message : "Feature Project tidak dapat dimuat.");
@@ -129,11 +139,11 @@ export function ProjectWorkspace() {
     setGeofenceLoading(true);
     setGeofenceError(null);
     try {
-      setGeofence(await getProjectGeofence(projectId));
+      setProjectWorkspaceValue("geofence", await getProjectGeofence(projectId));
     } catch (error) {
       // A project without a geofence answers 404; anything else is worth showing in the tab.
       if (error instanceof ProjectsApiError && error.status === 404) {
-        setGeofence(null);
+        setProjectWorkspaceValue("geofence", null);
         return;
       }
       setGeofenceError(geofenceErrorMessage(error));
@@ -143,11 +153,12 @@ export function ProjectWorkspace() {
   }, []);
 
   useEffect(() => {
+    resetWorkspaceStore();
     let active = true;
     void getProjects()
       .then((nextProjects) => {
         if (active) {
-          setProjects(sortByName(nextProjects));
+          setProjectWorkspaceValue("projects", sortByName(nextProjects));
           setProjectsError(null);
         }
       })
@@ -160,15 +171,15 @@ export function ProjectWorkspace() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [resetWorkspaceStore]);
 
   useEffect(() => {
     if (!activeProjectId) return;
     const controller = new AbortController();
     void getProjectFeatures(activeProjectId, controller.signal)
       .then((nextFeatures) => {
-        setFeatures(nextFeatures);
-        setFeatureRevision((revision) => revision + 1);
+        setProjectWorkspaceValue("features", nextFeatures);
+        setProjectWorkspaceValue("featureRevision", (revision) => revision + 1);
         setFeaturesError(null);
       })
       .catch((error: unknown) => {
@@ -189,18 +200,14 @@ export function ProjectWorkspace() {
   }, [notice]);
 
   const activateProject = useCallback((projectId: string) => {
-    setActiveProjectId(projectId);
-    setFeatures([]);
-    setSelectedFeatureIds([]);
+    activateProjectData(projectId);
     setFeaturesLoading(true);
-    setFocusGeometry(null);
-    setGeofence(null);
     setGeofenceError(null);
-    setGeofenceDrawing(false);
-    setGeofencePoints([]);
-    clearDraft();
+    setFormValues({});
+    setFormError(null);
+    setFormOpen(false);
     setFeaturesError(null);
-  }, [clearDraft]);
+  }, [activateProjectData]);
 
   const requestProjectChange = useCallback((projectId: string) => {
     if (projectId === activeProjectId) return;
@@ -215,7 +222,7 @@ export function ProjectWorkspace() {
 
   const handleCoordinate = useCallback((coordinate: Position) => {
     if (geofenceDrawing) {
-      setGeofencePoints((points) => [...points, coordinate]);
+      setProjectWorkspaceValue("geofencePoints", (points) => [...points, coordinate]);
       return;
     }
   }, [geofenceDrawing]);
@@ -223,8 +230,9 @@ export function ProjectWorkspace() {
   const startDrawing = useCallback((mode?: MapEditorMode) => {
     if (!activeProject) return;
     clearDraft();
-    setDrawing(true);
-    setEditorMode(mode ?? editorModeForGeometry(activeProject.geometry_type));
+    setProjectWorkspaceValue("featureSelectionMode", false);
+    setProjectWorkspaceValue("drawing", true);
+    setProjectWorkspaceValue("editorMode", mode ?? editorModeForGeometry(activeProject.geometry_type));
   }, [activeProject, clearDraft]);
 
   const changeEditorMode = useCallback((mode: MapEditorMode) => {
@@ -232,23 +240,59 @@ export function ProjectWorkspace() {
       startDrawing(mode);
       return;
     }
-    setEditorMode(mode);
+    setProjectWorkspaceValue("editorMode", mode);
   }, [drawing, startDrawing]);
 
   const startCut = useCallback(() => {
-    const [targetId] = selectedFeatureIds;
+    const [targetId] = activeSelection;
     if (!targetId) return;
     clearDraft();
+    setProjectWorkspaceValue("featureSelectionMode", false);
     setTopologyAction({ kind: "cut", targetId });
-    setDrawing(true);
-    setEditorMode("linestring");
-  }, [clearDraft, selectedFeatureIds]);
+    setProjectWorkspaceValue("drawing", true);
+    setProjectWorkspaceValue("editorMode", "linestring");
+  }, [activeSelection, clearDraft]);
 
   const startMerge = useCallback(() => {
-    if (selectedFeatureIds.length < 2) return;
-    const [targetId, ...sourceIds] = selectedFeatureIds;
+    if (activeSelection.length < 2) return;
+    const [targetId, ...sourceIds] = activeSelection;
     setTopologyConfirm({ kind: "merge", targetId, sourceIds });
-  }, [selectedFeatureIds]);
+  }, [activeSelection]);
+
+  const startFeatureDelete = useCallback(() => {
+    if (!activeSelection.length) return;
+    setFeatureDeleteConfirm(activeSelection);
+  }, [activeSelection]);
+
+  const selectProjectFeature = useCallback((featureId: string | null, additive: boolean) => {
+    if (!featureId) {
+      setProjectWorkspaceValue("selectedFeatureIds", []);
+      return;
+    }
+    setProjectWorkspaceValue("selectedFeatureIds", (current) => {
+      if (!additive) return [featureId];
+      return current.includes(featureId) ? current.filter((id) => id !== featureId) : [...current, featureId];
+    });
+  }, []);
+
+  const applyFeatureDelete = useCallback(async () => {
+    if (!activeProject || !featureDeleteConfirm?.length) return;
+    setFeatureDeleting(true);
+    try {
+      await Promise.all(featureDeleteConfirm.map((featureId) => deleteProjectFeature(activeProject.id, featureId)));
+      const deleted = new Set(featureDeleteConfirm);
+      setProjectWorkspaceValue("features", (current) => current.filter((feature) => !deleted.has(feature.id)));
+      setProjectWorkspaceValue("selectedFeatureIds", []);
+      setProjectWorkspaceValue("featureRevision", (revision) => revision + 1);
+      setFeatureDeleteConfirm(null);
+      setNotice(`${deleted.size} Feature dihapus.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Feature tidak dapat dihapus.");
+      void loadFeatures(activeProject.id);
+    } finally {
+      setFeatureDeleting(false);
+    }
+  }, [activeProject, featureDeleteConfirm, loadFeatures]);
 
   const finishDrawing = useCallback(() => {
     if (!activeProject) return;
@@ -257,8 +301,8 @@ export function ProjectWorkspace() {
         setNotice("Gambar satu garis pemotong terlebih dahulu.");
         return;
       }
-      setDrawing(false);
-      setEditorMode("select");
+      setProjectWorkspaceValue("drawing", false);
+      setProjectWorkspaceValue("editorMode", "select");
       setTopologyConfirm(topologyAction);
       setTopologyAction(null);
       return;
@@ -267,8 +311,8 @@ export function ProjectWorkspace() {
       setNotice(`Untuk ${geometryLabels[activeProject.geometry_type]}, selesaikan sketsa terlebih dahulu.`);
       return;
     }
-    setDrawing(false);
-    setEditorMode("select");
+    setProjectWorkspaceValue("drawing", false);
+    setProjectWorkspaceValue("editorMode", "select");
     setFormOpen(true);
   }, [activeProject, draftGeometry, topologyAction]);
 
@@ -279,7 +323,7 @@ export function ProjectWorkspace() {
       const result = topologyConfirm.kind === "cut"
         ? await cutProjectFeature(activeProject.id, topologyConfirm.targetId, draftGeometry as FeatureGeometry)
         : await mergeProjectFeatures(activeProject.id, topologyConfirm.targetId, topologyConfirm.sourceIds);
-      setFeatures((current) => {
+      setProjectWorkspaceValue("features", (current) => {
         const resultIds = new Set(result.features.map((feature) => feature.id));
         const removedIds = topologyConfirm.kind === "cut"
           ? new Set([topologyConfirm.targetId])
@@ -287,8 +331,8 @@ export function ProjectWorkspace() {
         return [...current.filter((feature) => !removedIds.has(feature.id) || resultIds.has(feature.id)), ...result.features.filter((feature) => !current.some((item) => item.id === feature.id))]
           .map((feature) => result.features.find((item) => item.id === feature.id) ?? feature);
       });
-      setFeatureRevision((revision) => revision + 1);
-      setSelectedFeatureIds([]);
+      setProjectWorkspaceValue("featureRevision", (revision) => revision + 1);
+      setProjectWorkspaceValue("selectedFeatureIds", []);
       clearDraft();
       setTopologyConfirm(null);
       setNotice(result.replayed ? "Operasi sebelumnya dimuat kembali." : `Feature berhasil ${result.operation === "cut" ? "dipotong" : "digabungkan"}.`);
@@ -321,8 +365,8 @@ export function ProjectWorkspace() {
     setFormError(null);
     try {
       const created = await createProjectFeature(activeProject.id, { geometry: draftGeometry, attributes });
-      setFeatures((current) => [...current, created]);
-      setFeatureRevision((revision) => revision + 1);
+      setProjectWorkspaceValue("features", (current) => [...current, created]);
+      setProjectWorkspaceValue("featureRevision", (revision) => revision + 1);
       setNotice("Feature baru tersimpan di Tileserver.");
       clearDraft();
     } catch (error) {
@@ -349,11 +393,11 @@ export function ProjectWorkspace() {
     (mode: "create" | "edit") => {
       if (mode === "edit" && activeProjectId) void loadGeofence(activeProjectId);
       else {
-        setGeofence(null);
+        setProjectWorkspaceValue("geofence", null);
         setGeofenceError(null);
       }
-      setGeofenceDrawing(false);
-      setGeofencePoints([]);
+      setProjectWorkspaceValue("geofenceDrawing", false);
+      setProjectWorkspaceValue("geofencePoints", []);
       setSettings({ open: true, mode });
     },
     [activeProjectId, loadGeofence],
@@ -361,8 +405,8 @@ export function ProjectWorkspace() {
 
   const closeSettings = useCallback(() => {
     setSettings(null);
-    setGeofenceDrawing(false);
-    setGeofencePoints([]);
+    setProjectWorkspaceValue("geofenceDrawing", false);
+    setProjectWorkspaceValue("geofencePoints", []);
   }, []);
 
   const applyGeofence = useCallback(async () => {
@@ -374,9 +418,9 @@ export function ProjectWorkspace() {
         type: "Polygon",
         coordinates: [[...geofencePoints, geofencePoints[0]]],
       });
-      setGeofence(saved);
-      setGeofenceDrawing(false);
-      setGeofencePoints([]);
+      setProjectWorkspaceValue("geofence", saved);
+      setProjectWorkspaceValue("geofenceDrawing", false);
+      setProjectWorkspaceValue("geofencePoints", []);
       setNotice("Geofence project tersimpan.");
     } catch (error) {
       setGeofenceError(geofenceErrorMessage(error));
@@ -391,7 +435,7 @@ export function ProjectWorkspace() {
     setGeofenceError(null);
     try {
       await deleteProjectGeofence(activeProjectId);
-      setGeofence(null);
+      setProjectWorkspaceValue("geofence", null);
       setNotice("Geofence project dihapus.");
     } catch (error) {
       setGeofenceError(geofenceErrorMessage(error));
@@ -402,7 +446,7 @@ export function ProjectWorkspace() {
 
   const handleSettingsSaved = useCallback(
     (saved: Project, options: { activate: boolean }) => {
-      setProjects((current) => {
+      setProjectWorkspaceValue("projects", (current) => {
         const next = current.some((project) => project.id === saved.id)
           ? current.map((project) => (project.id === saved.id ? saved : project))
           : [...current, saved];
@@ -426,21 +470,29 @@ export function ProjectWorkspace() {
       <ProjectMap
         project={activeProject}
         featureRevision={featureRevision}
-        drawing={geofenceDrawing}
+        drawing={drawing || geofenceDrawing}
         drawGeometryType={geofenceDrawing ? "polygon" : null}
         draftGeometry={geofenceDrawing ? null : draftGeometry}
         geofenceGeometry={geofencePreview}
         focusGeometry={focusGeometry}
         workspaceGeometries={features.map((feature) => feature.geometry)}
+        projectFeatures={features.map((feature) => ({ id: feature.id, geometry: feature.geometry }))}
+        selectedFeatureGeometries={features.filter((feature) => activeSelection.includes(feature.id)).map((feature) => feature.geometry)}
         onCoordinate={handleCoordinate}
         editorSession={editorSession}
         editorMode={drawing ? editorMode : null}
-        onDraftGeometryChange={setDraftGeometry}
+        onDraftGeometryChange={(geometry) => setProjectWorkspaceValue("draftGeometry", geometry)}
         onEditorModeChange={changeEditorMode}
+        featureSelectionMode={featureSelectionMode}
+        selectedFeatureCount={activeSelection.length}
+        onFeatureSelectionModeChange={(active) => setProjectWorkspaceValue("featureSelectionMode", active)}
+        onProjectFeatureSelect={selectProjectFeature}
         tableOpen={tableOpen}
         onTableToggle={() => setTableOpen((open) => !open)}
-        canCut={activeProject?.geometry_type === "polygon" && selectedFeatureIds.length === 1 && !drawing}
-        canMerge={activeProject?.geometry_type === "polygon" && selectedFeatureIds.length >= 2 && !drawing}
+        canDelete={activeSelection.length > 0 && !drawing}
+        onDelete={startFeatureDelete}
+        canCut={activeProject?.geometry_type === "polygon" && activeSelection.length === 1 && !drawing}
+        canMerge={activeProject?.geometry_type === "polygon" && activeSelection.length >= 2 && !drawing}
         onCut={startCut}
         onMerge={startMerge}
       />
@@ -514,9 +566,9 @@ export function ProjectWorkspace() {
             loading={featuresLoading}
             error={featuresError}
             onRetry={() => void loadFeatures(activeProject.id)}
-            onFeatureSelect={(feature) => setFocusGeometry({ ...feature.geometry })}
+            onFeatureSelect={(feature) => setProjectWorkspaceValue("focusGeometry", { ...feature.geometry })}
             selectedFeatureIds={selectedFeatureIds}
-            onFeatureToggle={(feature) => setSelectedFeatureIds((current) => current.includes(feature.id) ? current.filter((id) => id !== feature.id) : [...current, feature.id])}
+            onFeatureToggle={(feature) => setProjectWorkspaceValue("selectedFeatureIds", (current) => current.includes(feature.id) ? current.filter((id) => id !== feature.id) : [...current, feature.id])}
           />
         </div>
       ) : null}
@@ -552,6 +604,19 @@ export function ProjectWorkspace() {
         </div>
       ) : null}
 
+      {featureDeleteConfirm && activeProject ? (
+        <div className="fixed inset-0 z-[60] grid place-items-center bg-black/35 p-4" role="presentation">
+          <section role="dialog" aria-modal="true" aria-labelledby="delete-features-title" className="w-full max-w-md rounded-2xl border border-black/10 bg-white p-5 shadow-[0_18px_50px_rgba(28,27,25,0.24)]">
+            <h2 id="delete-features-title" className="text-lg font-semibold text-[#1c1b19]">Hapus Feature terpilih?</h2>
+            <p className="mt-2 text-sm leading-5 text-[#6b6760]">{featureDeleteConfirm.length} Feature akan dihapus secara permanen dari Project ini.</p>
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button type="button" disabled={featureDeleting} onClick={() => setFeatureDeleteConfirm(null)} className="min-h-11 rounded-xl px-4 text-sm font-semibold text-[#6b6760] transition hover:bg-[#f2f1ee] disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f6b5f]">Batal</button>
+              <button type="button" disabled={featureDeleting} onClick={() => void applyFeatureDelete()} className="min-h-11 rounded-xl bg-[#c0392b] px-4 text-sm font-semibold text-white transition hover:bg-[#9e2e23] disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c0392b]">{featureDeleting ? "Menghapus…" : "Hapus Feature"}</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
       {settings ? (
         <ProjectSettingsDialog
           project={settings.mode === "edit" ? activeProject : null}
@@ -564,12 +629,12 @@ export function ProjectWorkspace() {
           geofenceRemoving={geofenceRemoving}
           onGeofenceStartDrawing={() => {
             setGeofenceError(null);
-            setGeofencePoints([]);
-            setGeofenceDrawing(true);
+            setProjectWorkspaceValue("geofencePoints", []);
+            setProjectWorkspaceValue("geofenceDrawing", true);
           }}
           onGeofenceCancelDrawing={() => {
-            setGeofenceDrawing(false);
-            setGeofencePoints([]);
+            setProjectWorkspaceValue("geofenceDrawing", false);
+            setProjectWorkspaceValue("geofencePoints", []);
           }}
           onGeofenceApply={() => void applyGeofence()}
           onGeofenceRemove={() => void removeGeofence()}

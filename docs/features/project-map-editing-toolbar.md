@@ -14,10 +14,16 @@ The Project workspace includes a compact floating editing toolbar beside the map
 - Rectangle: an alternate way to create a Polygon Project geometry.
 - Undo and redo: move through changes in the active draft session.
 - Eraser: discard the active sketch without affecting saved Features.
+- Select: without an active sketch, enters saved-Feature selection mode on the map. A normal click selects only that Feature; Shift-click adds or removes a Feature from the multi-selection. Clicking empty map space clears the selection.
+- Delete: removes one or more selected saved Features after confirmation.
 - Cut: check one saved Polygon Feature, sketch a LineString across it, then confirm. The original Feature retains the larger output and a second Feature is created for the other output.
 - Merge: check two or more saved Polygon Features, then confirm. The first checked Feature is retained; its attributes remain and the other checked Features are removed.
 
 Tools that do not match the active Project geometry type are disabled. Cut and merge are available only for Polygon Projects. They are disabled while no valid saved-Feature selection exists.
+
+Selection can be made from the saved-data table or directly from the map. The dock highlights Select while map selection is active and changes the map cursor to a pointer. Delete, Cut, and Merge read the same parent workspace selection state, so they remain consistent regardless of where the Feature was selected.
+
+Selected Features receive a red map highlight, and the dock displays the selected count. The map resolves a Feature ID from validated object properties, exact geometry matching, or its source-data index before updating the workspace selection. The first selected Feature remains the Merge target.
 
 ## Input flow
 
