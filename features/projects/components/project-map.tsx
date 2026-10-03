@@ -45,6 +45,8 @@ type ProjectMapProps = {
   editorMode: MapEditorMode | null;
   onDraftGeometryChange: (geometry: FeatureGeometry | null) => void;
   onEditorModeChange: (mode: MapEditorMode) => void;
+  tableOpen: boolean;
+  onTableToggle: () => void;
   canCut: boolean;
   canMerge: boolean;
   onCut: () => void;
@@ -114,6 +116,8 @@ export function ProjectMap({
   editorMode,
   onDraftGeometryChange,
   onEditorModeChange,
+  tableOpen,
+  onTableToggle,
   canCut,
   canMerge,
   onCut,
@@ -346,6 +350,8 @@ export function ProjectMap({
             setCanRedo(drawRef.current?.canRedo() ?? false);
           }}
           onClear={clearEditorDraft}
+          tableOpen={tableOpen}
+          onTableToggle={onTableToggle}
           canCut={canCut}
           canMerge={canMerge}
           onCut={onCut}

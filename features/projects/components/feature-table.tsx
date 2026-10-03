@@ -1,6 +1,6 @@
 import { useState } from "react";
 import Button from "@/components/ui/button";
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Crosshair, Table2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Crosshair, Table2 } from "lucide-react";
 import type { Project, ProjectFeature } from "../types";
 
 const PAGE_SIZE = 10;
@@ -10,9 +10,7 @@ type FeatureTableProps = {
   features: ProjectFeature[];
   loading: boolean;
   error: string | null;
-  collapsed: boolean;
   onRetry: () => void;
-  onCollapsedChange: (collapsed: boolean) => void;
   onFeatureSelect: (feature: ProjectFeature) => void;
   selectedFeatureIds: string[];
   onFeatureToggle: (feature: ProjectFeature) => void;
@@ -23,7 +21,7 @@ function displayValue(value: unknown): string {
   return String(value);
 }
 
-export function FeatureTable({ project, features, loading, error, collapsed, onRetry, onCollapsedChange, onFeatureSelect, selectedFeatureIds, onFeatureToggle }: FeatureTableProps) {
+export function FeatureTable({ project, features, loading, error, onRetry, onFeatureSelect, selectedFeatureIds, onFeatureToggle }: FeatureTableProps) {
   const [page, setPage] = useState(1);
   const pageCount = Math.max(1, Math.ceil(features.length / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount);
@@ -33,33 +31,18 @@ export function FeatureTable({ project, features, loading, error, collapsed, onR
 
   return (
     <section aria-labelledby="feature-table-title" className="overflow-hidden rounded-2xl border border-black/10 bg-white shadow-[0_12px_32px_rgba(28,27,25,0.14)]">
-      <div className={`flex items-center justify-between gap-4 bg-[#fbfbfa] px-4 py-3 ${collapsed ? "" : "border-b border-black/10"}`}>
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between gap-4 border-b border-black/10 bg-[#fbfbfa] px-4 py-3">
+          <div className="flex items-center gap-2">
           <Table2 className="size-4 text-[#0f6b5f]" aria-hidden="true" />
           <div>
             <h2 id="feature-table-title" className="text-sm font-semibold text-[#1c1b19]">Data tersimpan</h2>
             <p className="font-mono text-xs text-[#6b6760]">{features.length} Feature · read-only</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {!collapsed ? <span className="hidden text-xs text-[#6b6760] sm:inline">Centang untuk operasi · pilih Fokus untuk peta</span> : null}
-          <Button
-            type="button"
-            variant="ghost"
-            size="lg"
-            aria-controls="feature-table-content"
-            aria-expanded={!collapsed}
-            onClick={() => onCollapsedChange(!collapsed)}
-            className="text-xs font-semibold text-[#0f6b5f] hover:bg-[#e7f1ef] hover:text-[#0a5049] focus-visible:border-[#0f6b5f] focus-visible:ring-[#0f6b5f]/30"
-          >
-            {collapsed ? <ChevronUp className="size-4" aria-hidden="true" /> : <ChevronDown className="size-4" aria-hidden="true" />}
-            <span className="hidden sm:inline">{collapsed ? "Buka tabel" : "Tutup tabel"}</span>
-            <span className="sm:hidden">{collapsed ? "Buka" : "Tutup"}</span>
-          </Button>
-        </div>
+        <span className="hidden text-xs text-[#6b6760] sm:inline">Centang untuk operasi · pilih Fokus untuk peta</span>
       </div>
 
-      {!collapsed ? <div id="feature-table-content">
+      <div id="feature-table-content">
       {loading ? <p className="px-4 py-6 text-sm text-[#6b6760]">Memuat Feature…</p> : null}
       {error ? (
         <div className="px-4 py-5" role="alert">
@@ -148,7 +131,7 @@ export function FeatureTable({ project, features, loading, error, collapsed, onR
           </nav>
         </div>
       ) : null}
-      </div> : null}
+      </div>
     </section>
   );
 }

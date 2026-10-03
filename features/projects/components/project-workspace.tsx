@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, LoaderCircle, MapPin, PencilLine, Play, Settings2, Trash2, X } from "lucide-react";
+import { LoaderCircle, PencilLine, Play, Settings2, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   createProjectFeature,
@@ -21,6 +21,7 @@ import type { MapEditorMode } from "./map-editing-toolbar";
 import { ProjectMap } from "./project-map";
 import { ProjectPicker } from "./project-picker";
 import { ProjectSettingsDialog } from "./project-settings-dialog";
+import { WorkspaceNavbar } from "./workspace-navbar";
 
 const geometryLabels: Record<Project["geometry_type"], string> = {
   point: "Point",
@@ -66,7 +67,7 @@ export function ProjectWorkspace() {
   const [pendingProjectId, setPendingProjectId] = useState<string | null>(null);
   const [switchConfirmOpen, setSwitchConfirmOpen] = useState(false);
   const [focusGeometry, setFocusGeometry] = useState<FeatureGeometry | null>(null);
-  const [tableCollapsed, setTableCollapsed] = useState(true);
+  const [tableOpen, setTableOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [settings, setSettings] = useState<SettingsState>(null);
   const [geofence, setGeofence] = useState<ProjectGeofence | null>(null);
@@ -436,35 +437,22 @@ export function ProjectWorkspace() {
         editorMode={drawing ? editorMode : null}
         onDraftGeometryChange={setDraftGeometry}
         onEditorModeChange={changeEditorMode}
+        tableOpen={tableOpen}
+        onTableToggle={() => setTableOpen((open) => !open)}
         canCut={activeProject?.geometry_type === "polygon" && selectedFeatureIds.length === 1 && !drawing}
         canMerge={activeProject?.geometry_type === "polygon" && selectedFeatureIds.length >= 2 && !drawing}
         onCut={startCut}
         onMerge={startMerge}
       />
 
-      <header id="workspace-controls" className="absolute inset-x-3 top-3 z-20 flex items-start justify-between gap-3 sm:inset-x-5 sm:top-5">
-        <div className="rounded-xl border border-black/10 bg-white/95 p-2 shadow-[0_5px_16px_rgba(28,27,25,0.12)] backdrop-blur">
-          <label className="sr-only" htmlFor="project-switcher">Project aktif</label>
-          <div className="flex items-center gap-2">
-            <span className="grid size-8 place-items-center rounded-lg bg-[#e7f1ef] text-[#0f6b5f]" aria-hidden="true"><MapPin className="size-4" /></span>
-            <select
-              id="project-switcher"
-              value={activeProjectId ?? ""}
-              onChange={(event) => requestProjectChange(event.target.value)}
-              className="h-9 max-w-48 appearance-none bg-transparent pr-6 text-sm font-semibold text-[#1c1b19] outline-none focus-visible:ring-2 focus-visible:ring-[#0f6b5f]"
-            >
-              <option value="" disabled>Pilih Project</option>
-              {projects.map((project) => <option key={project.id} value={project.id}>{project.name} · {geometryLabels[project.geometry_type]}</option>)}
-            </select>
-            <ChevronDown className="-ml-6 size-4 shrink-0 text-[#6b6760]" aria-hidden="true" />
-          </div>
-        </div>
-        {activeProject ? (
-          <div className="hidden rounded-xl border border-black/10 bg-white/95 px-3 py-2 shadow-[0_5px_16px_rgba(28,27,25,0.12)] backdrop-blur sm:block">
-            <p className="font-mono text-xs text-[#6b6760]">{geometryLabels[activeProject.geometry_type].toUpperCase()} · {features.length} FEATURE</p>
-          </div>
-        ) : null}
-      </header>
+      <WorkspaceNavbar
+        projects={projects}
+        activeProjectId={activeProjectId}
+        activeProject={activeProject}
+        featureCount={features.length}
+        onProjectChange={requestProjectChange}
+        onLoginUnavailable={() => setNotice("Form login tersedia, tetapi layanan autentikasi belum dikonfigurasi.")}
+      />
 
       {activeProject ? (
         <aside className="absolute left-3 top-16 z-20 w-[min(22rem,calc(100vw-1.5rem))] rounded-2xl border border-black/10 bg-white/95 p-3 shadow-[0_8px_24px_rgba(28,27,25,0.13)] backdrop-blur sm:left-5 sm:top-20">
@@ -517,17 +505,15 @@ export function ProjectWorkspace() {
         </div>
       ) : null}
 
-      {activeProject ? (
-        <div className="absolute inset-x-3 bottom-3 z-20 sm:inset-x-5 sm:bottom-5">
+      {activeProject && tableOpen ? (
+        <div className="absolute inset-x-3 bottom-20 z-20 sm:inset-x-5 sm:bottom-24">
           <FeatureTable
             key={activeProject.id}
             project={activeProject}
             features={features}
             loading={featuresLoading}
             error={featuresError}
-            collapsed={tableCollapsed}
             onRetry={() => void loadFeatures(activeProject.id)}
-            onCollapsedChange={setTableCollapsed}
             onFeatureSelect={(feature) => setFocusGeometry({ ...feature.geometry })}
             selectedFeatureIds={selectedFeatureIds}
             onFeatureToggle={(feature) => setSelectedFeatureIds((current) => current.includes(feature.id) ? current.filter((id) => id !== feature.id) : [...current, feature.id])}
@@ -535,7 +521,7 @@ export function ProjectWorkspace() {
         </div>
       ) : null}
 
-      {notice ? <p role="status" className="absolute bottom-56 left-1/2 z-30 -translate-x-1/2 rounded-xl border border-[#0f6b5f]/25 bg-white px-4 py-3 text-sm font-semibold text-[#0a5049] shadow-[0_8px_24px_rgba(28,27,25,0.16)]">{notice}</p> : null}
+      {notice ? <p role="status" className="absolute bottom-20 left-1/2 z-40 -translate-x-1/2 rounded-xl border border-[#0f6b5f]/25 bg-white px-4 py-3 text-sm font-semibold text-[#0a5049] shadow-[0_8px_24px_rgba(28,27,25,0.16)]">{notice}</p> : null}
 
       {formOpen && activeProject ? (
         <FeatureInputDialog
