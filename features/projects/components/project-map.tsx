@@ -4,9 +4,12 @@ import { MapboxOverlay } from "@deck.gl/mapbox";
 import type { Layer } from "deck.gl";
 import { layerFactory } from "@muhamadanjar/layers/layer-factory";
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMap } from "maplibre-gl";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { TerraDraw, TerraDrawLineStringMode, TerraDrawPointMode, TerraDrawPolygonMode, TerraDrawRectangleMode, TerraDrawSelectMode } from "terra-draw";
+import { TerraDrawMapLibreGLAdapter } from "terra-draw-maplibre-gl-adapter";
 import { projectGeoJsonUrl } from "../api/projects-api";
 import type { FeatureGeometry, GeometryType, Position, Project } from "../types";
+import { MapEditingToolbar, type MapEditorMode } from "./map-editing-toolbar";
 import { MapNavigationControls } from "./map-navigation-controls";
 
 const DEFAULT_VIEW = { center: [107.6191, -6.9175] as Position, zoom: 8.2 };
@@ -31,11 +34,29 @@ type ProjectMapProps = {
   project: Project | null;
   featureRevision: number;
   drawing: boolean;
+  /** Overrides the project's geometry type while drawing, so the geofence fence is always a polygon. */
+  drawGeometryType?: GeometryType | null;
   draftGeometry: FeatureGeometry | null;
+  geofenceGeometry?: FeatureGeometry | null;
   focusGeometry: FeatureGeometry | null;
   workspaceGeometries: FeatureGeometry[];
   onCoordinate: (coordinate: Position) => void;
+  editorSession: number;
+  editorMode: MapEditorMode | null;
+  onDraftGeometryChange: (geometry: FeatureGeometry | null) => void;
+  onEditorModeChange: (mode: MapEditorMode) => void;
+  canCut: boolean;
+  canMerge: boolean;
+  onCut: () => void;
+  onMerge: () => void;
 };
+
+function asFeatureGeometry(geometry: GeoJSON.Geometry): FeatureGeometry | null {
+  if (geometry.type === "Point") return { type: "Point", coordinates: geometry.coordinates as Position };
+  if (geometry.type === "LineString") return { type: "LineString", coordinates: geometry.coordinates as Position[] };
+  if (geometry.type === "Polygon") return { type: "Polygon", coordinates: geometry.coordinates as Position[][] };
+  return null;
+}
 
 function geometryToCollection(geometry: FeatureGeometry | null): GeoJSON.FeatureCollection {
   if (!geometry) return EMPTY_COLLECTION;
@@ -83,28 +104,54 @@ export function ProjectMap({
   project,
   featureRevision,
   drawing,
+  drawGeometryType = null,
   draftGeometry,
+  geofenceGeometry = null,
   focusGeometry,
   workspaceGeometries,
   onCoordinate,
+  editorSession,
+  editorMode,
+  onDraftGeometryChange,
+  onEditorModeChange,
+  canCut,
+  canMerge,
+  onCut,
+  onMerge,
 }: ProjectMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const overlayRef = useRef<MapboxOverlay | null>(null);
+  const drawRef = useRef<TerraDraw | null>(null);
   const onCoordinateRef = useRef(onCoordinate);
   const drawingRef = useRef(drawing);
   const geometryTypeRef = useRef<GeometryType | null>(project?.geometry_type ?? null);
+  const drawGeometryTypeRef = useRef<GeometryType | null>(drawGeometryType);
   const draftGeometryRef = useRef(draftGeometry);
+  const geofenceRef = useRef(geofenceGeometry);
+  const editorModeRef = useRef<MapEditorMode | null>(editorMode);
+  const onDraftGeometryChangeRef = useRef(onDraftGeometryChange);
+  const onEditorModeChangeRef = useRef(onEditorModeChange);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
 
   useEffect(() => {
     onCoordinateRef.current = onCoordinate;
     drawingRef.current = drawing;
     geometryTypeRef.current = project?.geometry_type ?? null;
-  }, [drawing, onCoordinate, project?.geometry_type]);
+    drawGeometryTypeRef.current = drawGeometryType;
+    editorModeRef.current = editorMode;
+    onDraftGeometryChangeRef.current = onDraftGeometryChange;
+    onEditorModeChangeRef.current = onEditorModeChange;
+  }, [drawing, drawGeometryType, editorMode, onCoordinate, onDraftGeometryChange, onEditorModeChange, project?.geometry_type]);
 
   useEffect(() => {
     draftGeometryRef.current = draftGeometry;
   }, [draftGeometry]);
+
+  useEffect(() => {
+    geofenceRef.current = geofenceGeometry;
+  }, [geofenceGeometry]);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -120,6 +167,35 @@ export function ProjectMap({
     map.addControl(overlay as unknown as maplibregl.IControl);
 
     map.on("load", () => {
+      const draw = new TerraDraw({
+        adapter: new TerraDrawMapLibreGLAdapter({ map }),
+        modes: [
+          new TerraDrawPointMode(),
+          new TerraDrawLineStringMode(),
+          new TerraDrawPolygonMode(),
+          new TerraDrawRectangleMode(),
+          new TerraDrawSelectMode(),
+        ],
+      });
+      const syncDraft = () => {
+        const draft = draw.getSnapshot().at(-1);
+        onDraftGeometryChangeRef.current(draft ? asFeatureGeometry(draft.geometry) : null);
+        setCanUndo(draw.canUndo());
+        setCanRedo(draw.canRedo());
+      };
+      draw.on("change", syncDraft);
+      draw.on("history", syncDraft);
+      draw.on("finish", () => {
+        syncDraft();
+        if (editorModeRef.current && draw.getSnapshot().length) {
+          draw.setMode("select");
+          onEditorModeChangeRef.current("select");
+        }
+      });
+      draw.start();
+      draw.setMode(editorModeRef.current ?? "select");
+      drawRef.current = draw;
+
       map.addSource("project-draft", { type: "geojson", data: EMPTY_COLLECTION });
       map.addLayer({
         id: "project-draft-fill",
@@ -147,11 +223,25 @@ export function ProjectMap({
         },
       });
       (map.getSource("project-draft") as GeoJSONSource).setData(geometryToCollection(draftGeometryRef.current));
+      map.addSource("project-geofence", { type: "geojson", data: geometryToCollection(geofenceRef.current) });
+      map.addLayer({
+        id: "project-geofence-fill",
+        type: "fill",
+        source: "project-geofence",
+        paint: { "fill-color": "#67a2c5", "fill-opacity": 0.14 },
+      });
+      map.addLayer({
+        id: "project-geofence-line",
+        type: "line",
+        source: "project-geofence",
+        paint: { "line-color": "#67a2c5", "line-width": 2, "line-dasharray": [3, 2] },
+      });
       map.getCanvas().style.cursor = drawingRef.current ? "crosshair" : "";
     });
 
     map.on("click", (event) => {
-      if (!drawingRef.current || !geometryTypeRef.current) return;
+      if (!drawingRef.current) return;
+      if (!drawGeometryTypeRef.current && !geometryTypeRef.current) return;
       onCoordinateRef.current([event.lngLat.lng, event.lngLat.lat]);
     });
 
@@ -159,11 +249,27 @@ export function ProjectMap({
     overlayRef.current = overlay;
 
     return () => {
+      drawRef.current?.stop();
+      drawRef.current = null;
       overlayRef.current = null;
       mapRef.current = null;
       map.remove();
     };
   }, []);
+
+  useEffect(() => {
+    const draw = drawRef.current;
+    if (!draw || !editorMode) return;
+    draw.setMode(editorMode);
+  }, [editorMode]);
+
+  useEffect(() => {
+    const draw = drawRef.current;
+    if (!draw) return;
+    draw.clear();
+    setCanUndo(false);
+    setCanRedo(false);
+  }, [editorSession]);
 
   useEffect(() => {
     const overlay = overlayRef.current;
@@ -177,8 +283,9 @@ export function ProjectMap({
     if (!map || !map.isStyleLoaded()) return;
     const source = map.getSource("project-draft") as GeoJSONSource | undefined;
     source?.setData(geometryToCollection(draftGeometry));
+    (map.getSource("project-geofence") as GeoJSONSource | undefined)?.setData(geometryToCollection(geofenceGeometry));
     map.getCanvas().style.cursor = drawing ? "crosshair" : "";
-  }, [draftGeometry, drawing]);
+  }, [draftGeometry, drawing, geofenceGeometry]);
 
   useEffect(() => {
     if (!focusGeometry || !mapRef.current) return;
@@ -194,12 +301,21 @@ export function ProjectMap({
   const focusWorkspace = () => {
     const map = mapRef.current;
     if (!map) return;
-    const bounds = boundsForGeometries(workspaceGeometries);
+    const bounds = boundsForGeometries(
+      workspaceGeometries.length > 0 ? workspaceGeometries : geofenceGeometry ? [geofenceGeometry] : [],
+    );
     if (!bounds) {
       map.flyTo({ center: DEFAULT_VIEW.center, zoom: DEFAULT_VIEW.zoom, bearing: 0, pitch: 0, duration: 550 });
       return;
     }
     map.fitBounds(bounds, { padding: { top: 132, right: 92, bottom: 116, left: 92 }, duration: 550, maxZoom: 16 });
+  };
+
+  const clearEditorDraft = () => {
+    drawRef.current?.clear();
+    onDraftGeometryChangeRef.current(null);
+    setCanUndo(false);
+    setCanRedo(false);
   };
 
   return (
@@ -211,6 +327,31 @@ export function ProjectMap({
         onResetNorth={() => mapRef.current?.easeTo({ bearing: 0, pitch: 0, duration: 180 })}
         onFocusWorkspace={focusWorkspace}
       />
+      {project ? (
+        <MapEditingToolbar
+          geometryType={project.geometry_type}
+          activeMode={editorMode}
+          hasDraft={Boolean(draftGeometry)}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          onModeChange={onEditorModeChange}
+          onUndo={() => {
+            drawRef.current?.undo();
+            setCanUndo(drawRef.current?.canUndo() ?? false);
+            setCanRedo(drawRef.current?.canRedo() ?? false);
+          }}
+          onRedo={() => {
+            drawRef.current?.redo();
+            setCanUndo(drawRef.current?.canUndo() ?? false);
+            setCanRedo(drawRef.current?.canRedo() ?? false);
+          }}
+          onClear={clearEditorDraft}
+          canCut={canCut}
+          canMerge={canMerge}
+          onCut={onCut}
+          onMerge={onMerge}
+        />
+      ) : null}
     </div>
   );
 }

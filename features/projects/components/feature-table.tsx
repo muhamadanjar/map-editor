@@ -14,6 +14,8 @@ type FeatureTableProps = {
   onRetry: () => void;
   onCollapsedChange: (collapsed: boolean) => void;
   onFeatureSelect: (feature: ProjectFeature) => void;
+  selectedFeatureIds: string[];
+  onFeatureToggle: (feature: ProjectFeature) => void;
 };
 
 function displayValue(value: unknown): string {
@@ -21,7 +23,7 @@ function displayValue(value: unknown): string {
   return String(value);
 }
 
-export function FeatureTable({ project, features, loading, error, collapsed, onRetry, onCollapsedChange, onFeatureSelect }: FeatureTableProps) {
+export function FeatureTable({ project, features, loading, error, collapsed, onRetry, onCollapsedChange, onFeatureSelect, selectedFeatureIds, onFeatureToggle }: FeatureTableProps) {
   const [page, setPage] = useState(1);
   const pageCount = Math.max(1, Math.ceil(features.length / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount);
@@ -40,7 +42,7 @@ export function FeatureTable({ project, features, loading, error, collapsed, onR
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {!collapsed ? <span className="hidden text-xs text-[#6b6760] sm:inline">Pilih baris untuk fokus ke peta</span> : null}
+          {!collapsed ? <span className="hidden text-xs text-[#6b6760] sm:inline">Centang untuk operasi · pilih Fokus untuk peta</span> : null}
           <Button
             type="button"
             variant="ghost"
@@ -73,6 +75,7 @@ export function FeatureTable({ project, features, loading, error, collapsed, onR
           <table className="w-full min-w-max border-collapse text-left text-sm">
             <thead className="sticky top-0 bg-[#f2f1ee] text-xs font-medium uppercase tracking-[0.1em] text-[#6b6760]">
               <tr>
+                <th className="w-11 px-3 py-2.5"><span className="sr-only">Pilih</span></th>
                 <th className="px-4 py-2.5">ID</th>
                 {project.form_schema.map((field) => <th key={field.name} className="px-4 py-2.5">{field.label}</th>)}
                 <th className="px-4 py-2.5"><span className="sr-only">Aksi</span></th>
@@ -80,7 +83,16 @@ export function FeatureTable({ project, features, loading, error, collapsed, onR
             </thead>
             <tbody>
               {visibleFeatures.map((feature) => (
-                <tr key={feature.id} className="border-t border-black/[0.07] hover:bg-[#f2f7f6]">
+                <tr key={feature.id} className={`border-t border-black/[0.07] hover:bg-[#f2f7f6] ${selectedFeatureIds.includes(feature.id) ? "bg-[#e7f1ef]" : ""}`}>
+                  <td className="px-3 py-2.5">
+                    <input
+                      type="checkbox"
+                      checked={selectedFeatureIds.includes(feature.id)}
+                      onChange={() => onFeatureToggle(feature)}
+                      aria-label={`Pilih Feature ${feature.id.slice(0, 8)}`}
+                      className="size-4 rounded border-black/30 accent-[#0f6b5f] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f6b5f]"
+                    />
+                  </td>
                   <td className="px-4 py-2.5 font-mono text-xs text-[#6b6760]">{feature.id.slice(0, 8)}</td>
                   {project.form_schema.map((field) => (
                     <td key={field.name} className="max-w-48 truncate px-4 py-2.5 text-[#1c1b19]">{displayValue(feature.attributes[field.name])}</td>

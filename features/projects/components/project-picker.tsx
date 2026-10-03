@@ -1,4 +1,4 @@
-import { ChevronRight, Layers3, MapPin } from "lucide-react";
+import { ChevronRight, Layers3, MapPin, Plus } from "lucide-react";
 import type { Project } from "../types";
 
 type ProjectPickerProps = {
@@ -7,6 +7,7 @@ type ProjectPickerProps = {
   error: string | null;
   onRetry: () => void;
   onSelect: (projectId: string) => void;
+  onCreate: () => void;
 };
 
 const geometryLabel: Record<Project["geometry_type"], string> = {
@@ -15,7 +16,7 @@ const geometryLabel: Record<Project["geometry_type"], string> = {
   polygon: "Polygon",
 };
 
-export function ProjectPicker({ projects, loading, error, onRetry, onSelect }: ProjectPickerProps) {
+export function ProjectPicker({ projects, loading, error, onRetry, onSelect, onCreate }: ProjectPickerProps) {
   return (
     <section
       aria-labelledby="project-picker-title"
@@ -34,6 +35,14 @@ export function ProjectPicker({ projects, loading, error, onRetry, onSelect }: P
         </div>
       </div>
 
+      <button
+        type="button"
+        onClick={onCreate}
+        className="mb-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-[#0f6b5f]/30 bg-[#f2f7f6] px-4 text-sm font-semibold text-[#0f6b5f] transition hover:bg-[#e7f1ef] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f6b5f]"
+      >
+        <Plus className="size-4" aria-hidden="true" /> Project baru
+      </button>
+
       {loading ? <p className="py-6 text-center text-sm text-[#6b6760]">Memuat daftar Project…</p> : null}
 
       {error ? (
@@ -49,7 +58,7 @@ export function ProjectPicker({ projects, loading, error, onRetry, onSelect }: P
         <div className="rounded-xl border border-dashed border-black/15 bg-[#fbfbfa] px-4 py-7 text-center">
           <Layers3 className="mx-auto size-5 text-[#9c9890]" aria-hidden="true" />
           <p className="mt-2 text-sm font-medium text-[#1c1b19]">Belum ada Project</p>
-          <p className="mt-1 text-sm text-[#6b6760]">Buat Project di aplikasi pengelolaan data terlebih dahulu.</p>
+          <p className="mt-1 text-sm text-[#6b6760]">Buat project baru untuk mulai mengumpulkan data.</p>
         </div>
       ) : null}
 

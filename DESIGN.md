@@ -20,8 +20,7 @@ typography:
   data: "IBM Plex Mono"
 register: product
 ---
-
-# Design System: Geoportal
+# Design System: Map Editor
 
 ## North Star
 

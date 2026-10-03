@@ -19,6 +19,10 @@ async function proxy(request: NextRequest, context: Context): Promise<Response> 
   const headers = new Headers({ Accept: request.headers.get("accept") ?? "application/json" });
   const contentType = request.headers.get("content-type");
   if (contentType) headers.set("Content-Type", contentType);
+  for (const header of ["authorization", "x-application-id", "x-required-permission", "idempotency-key"]) {
+    const value = request.headers.get(header);
+    if (value) headers.set(header, value);
+  }
 
   try {
     const upstream = await fetch(target, {
@@ -47,5 +51,17 @@ export async function GET(request: NextRequest, context: Context) {
 }
 
 export async function POST(request: NextRequest, context: Context) {
+  return proxy(request, context);
+}
+
+export async function PATCH(request: NextRequest, context: Context) {
+  return proxy(request, context);
+}
+
+export async function PUT(request: NextRequest, context: Context) {
+  return proxy(request, context);
+}
+
+export async function DELETE(request: NextRequest, context: Context) {
   return proxy(request, context);
 }

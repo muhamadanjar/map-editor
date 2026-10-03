@@ -1,13 +1,26 @@
 "use client";
 
-import { ChevronDown, LoaderCircle, MapPin, PencilLine, Play, Trash2, X } from "lucide-react";
+import { ChevronDown, LoaderCircle, MapPin, PencilLine, Play, Settings2, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { createProjectFeature, getProjectFeatures, getProjects } from "../api/projects-api";
-import type { FeatureGeometry, Position, Project, ProjectFeature } from "../types";
+import {
+  createProjectFeature,
+  cutProjectFeature,
+  deleteProjectGeofence,
+  getProjectFeatures,
+  getProjectGeofence,
+  getProjects,
+  mergeProjectFeatures,
+  ProjectsApiError,
+  upsertProjectGeofence,
+} from "../api/projects-api";
+import type { FeatureGeometry, Position, Project, ProjectFeature, ProjectGeofence } from "../types";
+import { geofenceErrorMessage } from "./project-geofence-settings";
 import { FeatureInputDialog } from "./feature-input-dialog";
 import { FeatureTable } from "./feature-table";
+import type { MapEditorMode } from "./map-editing-toolbar";
 import { ProjectMap } from "./project-map";
 import { ProjectPicker } from "./project-picker";
+import { ProjectSettingsDialog } from "./project-settings-dialog";
 
 const geometryLabels: Record<Project["geometry_type"], string> = {
   point: "Point",
@@ -15,17 +28,22 @@ const geometryLabels: Record<Project["geometry_type"], string> = {
   polygon: "Polygon",
 };
 
-function draftPreview(type: Project["geometry_type"] | undefined, coordinates: Position[], saved: FeatureGeometry | null): FeatureGeometry | null {
-  if (saved) return saved;
-  if (!type || coordinates.length === 0) return null;
-  if (type === "point") return { type: "Point", coordinates: coordinates[0] };
-  return { type: "LineString", coordinates };
+function editorModeForGeometry(type: Project["geometry_type"]): MapEditorMode {
+  return type === "point" ? "point" : type === "line" ? "linestring" : "polygon";
 }
 
-function finalGeometry(type: Project["geometry_type"], coordinates: Position[]): FeatureGeometry | null {
-  if (type === "point") return coordinates[0] ? { type: "Point", coordinates: coordinates[0] } : null;
-  if (type === "line") return coordinates.length >= 2 ? { type: "LineString", coordinates } : null;
-  return coordinates.length >= 3 ? { type: "Polygon", coordinates: [[...coordinates, coordinates[0]]] } : null;
+function geometryIsValidForProject(type: Project["geometry_type"], geometry: FeatureGeometry | null): boolean {
+  if (!geometry) return false;
+  if (type === "point") return geometry.type === "Point";
+  if (type === "line") return geometry.type === "LineString" && geometry.coordinates.length >= 2;
+  return geometry.type === "Polygon" && geometry.coordinates[0]?.length >= 4;
+}
+
+type SettingsState = { open: boolean; mode: "create" | "edit" } | null;
+type TopologyAction = { kind: "cut"; targetId: string } | { kind: "merge"; targetId: string; sourceIds: string[] };
+
+function sortByName(projects: Project[]): Project[] {
+  return [...projects].sort((a, b) => a.name.localeCompare(b.name, "id"));
 }
 
 export function ProjectWorkspace() {
@@ -38,7 +56,8 @@ export function ProjectWorkspace() {
   const [featuresError, setFeaturesError] = useState<string | null>(null);
   const [featureRevision, setFeatureRevision] = useState(0);
   const [drawing, setDrawing] = useState(false);
-  const [draftCoordinates, setDraftCoordinates] = useState<Position[]>([]);
+  const [editorMode, setEditorMode] = useState<MapEditorMode | null>(null);
+  const [editorSession, setEditorSession] = useState(0);
   const [draftGeometry, setDraftGeometry] = useState<FeatureGeometry | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [formValues, setFormValues] = useState<Record<string, string>>({});
@@ -49,6 +68,18 @@ export function ProjectWorkspace() {
   const [focusGeometry, setFocusGeometry] = useState<FeatureGeometry | null>(null);
   const [tableCollapsed, setTableCollapsed] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
+  const [settings, setSettings] = useState<SettingsState>(null);
+  const [geofence, setGeofence] = useState<ProjectGeofence | null>(null);
+  const [geofenceLoading, setGeofenceLoading] = useState(false);
+  const [geofenceError, setGeofenceError] = useState<string | null>(null);
+  const [geofenceDrawing, setGeofenceDrawing] = useState(false);
+  const [geofencePoints, setGeofencePoints] = useState<Position[]>([]);
+  const [geofenceApplying, setGeofenceApplying] = useState(false);
+  const [geofenceRemoving, setGeofenceRemoving] = useState(false);
+  const [selectedFeatureIds, setSelectedFeatureIds] = useState<string[]>([]);
+  const [topologyAction, setTopologyAction] = useState<TopologyAction | null>(null);
+  const [topologyConfirm, setTopologyConfirm] = useState<TopologyAction | null>(null);
+  const [topologySubmitting, setTopologySubmitting] = useState(false);
 
   const activeProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId) ?? null,
@@ -57,18 +88,19 @@ export function ProjectWorkspace() {
 
   const clearDraft = useCallback(() => {
     setDrawing(false);
-    setDraftCoordinates([]);
+    setEditorMode(null);
     setDraftGeometry(null);
     setFormValues({});
     setFormError(null);
     setFormOpen(false);
+    setEditorSession((session) => session + 1);
   }, []);
 
   const loadProjects = useCallback(async () => {
     setProjectsLoading(true);
     setProjectsError(null);
     try {
-      setProjects(await getProjects());
+      setProjects(sortByName(await getProjects()));
     } catch (error) {
       setProjectsError(error instanceof Error ? error.message : "Daftar Project tidak dapat dimuat.");
     } finally {
@@ -92,12 +124,29 @@ export function ProjectWorkspace() {
     }
   }, []);
 
+  const loadGeofence = useCallback(async (projectId: string) => {
+    setGeofenceLoading(true);
+    setGeofenceError(null);
+    try {
+      setGeofence(await getProjectGeofence(projectId));
+    } catch (error) {
+      // A project without a geofence answers 404; anything else is worth showing in the tab.
+      if (error instanceof ProjectsApiError && error.status === 404) {
+        setGeofence(null);
+        return;
+      }
+      setGeofenceError(geofenceErrorMessage(error));
+    } finally {
+      setGeofenceLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     let active = true;
     void getProjects()
       .then((nextProjects) => {
         if (active) {
-          setProjects(nextProjects);
+          setProjects(sortByName(nextProjects));
           setProjectsError(null);
         }
       })
@@ -141,50 +190,113 @@ export function ProjectWorkspace() {
   const activateProject = useCallback((projectId: string) => {
     setActiveProjectId(projectId);
     setFeatures([]);
+    setSelectedFeatureIds([]);
     setFeaturesLoading(true);
     setFocusGeometry(null);
+    setGeofence(null);
+    setGeofenceError(null);
+    setGeofenceDrawing(false);
+    setGeofencePoints([]);
     clearDraft();
     setFeaturesError(null);
   }, [clearDraft]);
 
   const requestProjectChange = useCallback((projectId: string) => {
     if (projectId === activeProjectId) return;
-    const hasDraft = drawing || draftCoordinates.length > 0 || draftGeometry !== null || formOpen;
+    const hasDraft = drawing || draftGeometry !== null || formOpen;
     if (hasDraft) {
       setPendingProjectId(projectId);
       setSwitchConfirmOpen(true);
       return;
     }
     activateProject(projectId);
-  }, [activateProject, activeProjectId, draftCoordinates.length, draftGeometry, drawing, formOpen]);
+  }, [activateProject, activeProjectId, draftGeometry, drawing, formOpen]);
 
   const handleCoordinate = useCallback((coordinate: Position) => {
-    if (!activeProject || !drawing) return;
-    if (activeProject.geometry_type === "point") {
-      setDraftGeometry({ type: "Point", coordinates: coordinate });
-      setDrawing(false);
-      setFormOpen(true);
+    if (geofenceDrawing) {
+      setGeofencePoints((points) => [...points, coordinate]);
       return;
     }
-    setDraftCoordinates((coordinates) => [...coordinates, coordinate]);
-  }, [activeProject, drawing]);
+  }, [geofenceDrawing]);
 
-  const startDrawing = useCallback(() => {
+  const startDrawing = useCallback((mode?: MapEditorMode) => {
+    if (!activeProject) return;
     clearDraft();
     setDrawing(true);
-  }, [clearDraft]);
+    setEditorMode(mode ?? editorModeForGeometry(activeProject.geometry_type));
+  }, [activeProject, clearDraft]);
+
+  const changeEditorMode = useCallback((mode: MapEditorMode) => {
+    if (!drawing) {
+      startDrawing(mode);
+      return;
+    }
+    setEditorMode(mode);
+  }, [drawing, startDrawing]);
+
+  const startCut = useCallback(() => {
+    const [targetId] = selectedFeatureIds;
+    if (!targetId) return;
+    clearDraft();
+    setTopologyAction({ kind: "cut", targetId });
+    setDrawing(true);
+    setEditorMode("linestring");
+  }, [clearDraft, selectedFeatureIds]);
+
+  const startMerge = useCallback(() => {
+    if (selectedFeatureIds.length < 2) return;
+    const [targetId, ...sourceIds] = selectedFeatureIds;
+    setTopologyConfirm({ kind: "merge", targetId, sourceIds });
+  }, [selectedFeatureIds]);
 
   const finishDrawing = useCallback(() => {
     if (!activeProject) return;
-    const geometry = finalGeometry(activeProject.geometry_type, draftCoordinates);
-    if (!geometry) {
-      setNotice(`Untuk ${geometryLabels[activeProject.geometry_type]}, tambahkan lebih banyak titik terlebih dahulu.`);
+    if (topologyAction?.kind === "cut") {
+      if (draftGeometry?.type !== "LineString") {
+        setNotice("Gambar satu garis pemotong terlebih dahulu.");
+        return;
+      }
+      setDrawing(false);
+      setEditorMode("select");
+      setTopologyConfirm(topologyAction);
+      setTopologyAction(null);
       return;
     }
-    setDraftGeometry(geometry);
+    if (!geometryIsValidForProject(activeProject.geometry_type, draftGeometry)) {
+      setNotice(`Untuk ${geometryLabels[activeProject.geometry_type]}, selesaikan sketsa terlebih dahulu.`);
+      return;
+    }
     setDrawing(false);
+    setEditorMode("select");
     setFormOpen(true);
-  }, [activeProject, draftCoordinates]);
+  }, [activeProject, draftGeometry, topologyAction]);
+
+  const applyTopology = useCallback(async () => {
+    if (!activeProject || !topologyConfirm) return;
+    setTopologySubmitting(true);
+    try {
+      const result = topologyConfirm.kind === "cut"
+        ? await cutProjectFeature(activeProject.id, topologyConfirm.targetId, draftGeometry as FeatureGeometry)
+        : await mergeProjectFeatures(activeProject.id, topologyConfirm.targetId, topologyConfirm.sourceIds);
+      setFeatures((current) => {
+        const resultIds = new Set(result.features.map((feature) => feature.id));
+        const removedIds = topologyConfirm.kind === "cut"
+          ? new Set([topologyConfirm.targetId])
+          : new Set([topologyConfirm.targetId, ...topologyConfirm.sourceIds]);
+        return [...current.filter((feature) => !removedIds.has(feature.id) || resultIds.has(feature.id)), ...result.features.filter((feature) => !current.some((item) => item.id === feature.id))]
+          .map((feature) => result.features.find((item) => item.id === feature.id) ?? feature);
+      });
+      setFeatureRevision((revision) => revision + 1);
+      setSelectedFeatureIds([]);
+      clearDraft();
+      setTopologyConfirm(null);
+      setNotice(result.replayed ? "Operasi sebelumnya dimuat kembali." : `Feature berhasil ${result.operation === "cut" ? "dipotong" : "digabungkan"}.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Operasi geometri gagal dilakukan.");
+    } finally {
+      setTopologySubmitting(false);
+    }
+  }, [activeProject, clearDraft, draftGeometry, topologyConfirm]);
 
   const submitFeature = useCallback(async () => {
     if (!activeProject || !draftGeometry) return;
@@ -219,8 +331,93 @@ export function ProjectWorkspace() {
     }
   }, [activeProject, clearDraft, draftGeometry, formValues]);
 
-  const previewGeometry = draftPreview(activeProject?.geometry_type, draftCoordinates, draftGeometry);
-  const hasEnoughVertices = activeProject?.geometry_type === "line" ? draftCoordinates.length >= 2 : draftCoordinates.length >= 3;
+  const hasValidDraft = activeProject ? geometryIsValidForProject(activeProject.geometry_type, draftGeometry) : false;
+
+  // The geofence fence draws on the workspace map, so its preview shares the map with the feature draft.
+  // It renders through the fence source so a boundary in progress never looks like a feature.
+  const geofencePreview = useMemo<FeatureGeometry | null>(() => {
+    if (!geofenceDrawing) return geofence?.geometry ?? null;
+    if (geofencePoints.length >= 3) {
+      return { type: "Polygon", coordinates: [[...geofencePoints, geofencePoints[0]]] };
+    }
+    if (geofencePoints.length === 2) return { type: "LineString", coordinates: geofencePoints };
+    return null;
+  }, [geofence, geofenceDrawing, geofencePoints]);
+
+  const openSettings = useCallback(
+    (mode: "create" | "edit") => {
+      if (mode === "edit" && activeProjectId) void loadGeofence(activeProjectId);
+      else {
+        setGeofence(null);
+        setGeofenceError(null);
+      }
+      setGeofenceDrawing(false);
+      setGeofencePoints([]);
+      setSettings({ open: true, mode });
+    },
+    [activeProjectId, loadGeofence],
+  );
+
+  const closeSettings = useCallback(() => {
+    setSettings(null);
+    setGeofenceDrawing(false);
+    setGeofencePoints([]);
+  }, []);
+
+  const applyGeofence = useCallback(async () => {
+    if (!activeProjectId || geofencePoints.length < 3) return;
+    setGeofenceApplying(true);
+    setGeofenceError(null);
+    try {
+      const saved = await upsertProjectGeofence(activeProjectId, {
+        type: "Polygon",
+        coordinates: [[...geofencePoints, geofencePoints[0]]],
+      });
+      setGeofence(saved);
+      setGeofenceDrawing(false);
+      setGeofencePoints([]);
+      setNotice("Geofence project tersimpan.");
+    } catch (error) {
+      setGeofenceError(geofenceErrorMessage(error));
+    } finally {
+      setGeofenceApplying(false);
+    }
+  }, [activeProjectId, geofencePoints]);
+
+  const removeGeofence = useCallback(async () => {
+    if (!activeProjectId) return;
+    setGeofenceRemoving(true);
+    setGeofenceError(null);
+    try {
+      await deleteProjectGeofence(activeProjectId);
+      setGeofence(null);
+      setNotice("Geofence project dihapus.");
+    } catch (error) {
+      setGeofenceError(geofenceErrorMessage(error));
+    } finally {
+      setGeofenceRemoving(false);
+    }
+  }, [activeProjectId]);
+
+  const handleSettingsSaved = useCallback(
+    (saved: Project, options: { activate: boolean }) => {
+      setProjects((current) => {
+        const next = current.some((project) => project.id === saved.id)
+          ? current.map((project) => (project.id === saved.id ? saved : project))
+          : [...current, saved];
+        return sortByName(next);
+      });
+      setSettings(null);
+      if (options.activate) activateProject(saved.id);
+      setGeofenceError(null);
+      setNotice(
+        saved.guest_enabled && saved.public_slug
+          ? `Project tersimpan. Formulir guest aktif di /guest/${saved.public_slug}.`
+          : "Project tersimpan.",
+      );
+    },
+    [activateProject],
+  );
 
   return (
     <main className="relative h-dvh overflow-hidden bg-[#f6f6f5] text-[#1c1b19]">
@@ -228,11 +425,21 @@ export function ProjectWorkspace() {
       <ProjectMap
         project={activeProject}
         featureRevision={featureRevision}
-        drawing={drawing}
-        draftGeometry={previewGeometry}
+        drawing={geofenceDrawing}
+        drawGeometryType={geofenceDrawing ? "polygon" : null}
+        draftGeometry={geofenceDrawing ? null : draftGeometry}
+        geofenceGeometry={geofencePreview}
         focusGeometry={focusGeometry}
         workspaceGeometries={features.map((feature) => feature.geometry)}
         onCoordinate={handleCoordinate}
+        editorSession={editorSession}
+        editorMode={drawing ? editorMode : null}
+        onDraftGeometryChange={setDraftGeometry}
+        onEditorModeChange={changeEditorMode}
+        canCut={activeProject?.geometry_type === "polygon" && selectedFeatureIds.length === 1 && !drawing}
+        canMerge={activeProject?.geometry_type === "polygon" && selectedFeatureIds.length >= 2 && !drawing}
+        onCut={startCut}
+        onMerge={startMerge}
       />
 
       <header id="workspace-controls" className="absolute inset-x-3 top-3 z-20 flex items-start justify-between gap-3 sm:inset-x-5 sm:top-5">
@@ -270,35 +477,43 @@ export function ProjectWorkspace() {
             <span className="shrink-0 rounded-md bg-[#e7f1ef] px-2 py-1 font-mono text-xs text-[#0f6b5f]">{geometryLabels[activeProject.geometry_type]}</span>
           </div>
 
-          <div className="mt-3 border-t border-black/10 pt-3">
+          <div className="mt-3 space-y-2 border-t border-black/10 pt-3">
             {!drawing ? (
-              <button type="button" onClick={startDrawing} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0f6b5f] px-4 text-sm font-semibold text-white transition hover:bg-[#0a5049] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f6b5f]">
+              <button type="button" onClick={() => startDrawing()} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0f6b5f] px-4 text-sm font-semibold text-white transition hover:bg-[#0a5049] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f6b5f]">
                 <PencilLine className="size-4" aria-hidden="true" /> Tambah {geometryLabels[activeProject.geometry_type]}
               </button>
             ) : (
               <div className="space-y-2">
                 <p className="rounded-lg bg-[#e7f1ef] px-3 py-2 text-sm text-[#0a5049]">
-                  {activeProject.geometry_type === "point" ? "Klik satu lokasi pada peta." : "Klik peta untuk menambah titik, lalu selesaikan bentuk."}
+                  {editorMode === "select"
+                    ? "Tarik vertex pada peta untuk menyempurnakan sketsa."
+                    : editorMode === "rectangle"
+                      ? "Tarik pada peta untuk membuat rectangle."
+                      : "Gunakan toolbar peta untuk menggambar, lalu pilih Selesai."}
                 </p>
                 <div className="flex gap-2">
-                  {activeProject.geometry_type !== "point" ? (
-                    <button type="button" onClick={finishDrawing} disabled={!hasEnoughVertices} className="inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-[#0f6b5f] px-3 text-sm font-semibold text-white transition hover:bg-[#0a5049] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f6b5f]">
-                      <Play className="size-4" aria-hidden="true" /> Selesai
-                    </button>
-                  ) : null}
+                  <button type="button" onClick={finishDrawing} disabled={topologyAction ? draftGeometry?.type !== "LineString" : !hasValidDraft} className="inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-[#0f6b5f] px-3 text-sm font-semibold text-white transition hover:bg-[#0a5049] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f6b5f]">
+                    <Play className="size-4" aria-hidden="true" /> Selesai
+                  </button>
                   <button type="button" onClick={clearDraft} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-black/15 bg-white px-3 text-sm font-semibold text-[#6b6760] transition hover:bg-[#f2f1ee] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f6b5f]">
                     <X className="size-4" aria-hidden="true" /> Batal
                   </button>
                 </div>
               </div>
             )}
+            <button type="button" onClick={() => openSettings("edit")} className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-black/15 bg-white px-3 text-sm font-semibold text-[#6b6760] transition hover:bg-[#f2f1ee] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f6b5f]">
+              <Settings2 className="size-4" aria-hidden="true" /> Pengaturan project
+            </button>
+            {geofence ? (
+              <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#2f5d7c]">Geofence aktif</p>
+            ) : null}
           </div>
         </aside>
       ) : null}
 
       {!activeProject ? (
         <div className="absolute inset-0 z-10 grid place-items-center p-4 pointer-events-none">
-          <div className="pointer-events-auto"><ProjectPicker projects={projects} loading={projectsLoading} error={projectsError} onRetry={() => void loadProjects()} onSelect={requestProjectChange} /></div>
+          <div className="pointer-events-auto"><ProjectPicker projects={projects} loading={projectsLoading} error={projectsError} onRetry={() => void loadProjects()} onSelect={requestProjectChange} onCreate={() => openSettings("create")} /></div>
         </div>
       ) : null}
 
@@ -314,6 +529,8 @@ export function ProjectWorkspace() {
             onRetry={() => void loadFeatures(activeProject.id)}
             onCollapsedChange={setTableCollapsed}
             onFeatureSelect={(feature) => setFocusGeometry({ ...feature.geometry })}
+            selectedFeatureIds={selectedFeatureIds}
+            onFeatureToggle={(feature) => setSelectedFeatureIds((current) => current.includes(feature.id) ? current.filter((id) => id !== feature.id) : [...current, feature.id])}
           />
         </div>
       ) : null}
@@ -329,6 +546,49 @@ export function ProjectWorkspace() {
           onChange={(name, value) => setFormValues((current) => ({ ...current, [name]: value }))}
           onClose={clearDraft}
           onSubmit={() => void submitFeature()}
+        />
+      ) : null}
+
+      {topologyConfirm && activeProject ? (
+        <div className="fixed inset-0 z-[60] grid place-items-center bg-black/35 p-4" role="presentation">
+          <section role="dialog" aria-modal="true" aria-labelledby="topology-title" className="w-full max-w-md rounded-2xl border border-black/10 bg-white p-5 shadow-[0_18px_50px_rgba(28,27,25,0.24)]">
+            <h2 id="topology-title" className="text-lg font-semibold text-[#1c1b19]">{topologyConfirm.kind === "cut" ? "Potong Feature terpilih?" : "Gabungkan Feature terpilih?"}</h2>
+            <p className="mt-2 text-sm leading-5 text-[#6b6760]">
+              {topologyConfirm.kind === "cut"
+                ? "Feature asli akan dipertahankan pada potongan terbesar dan satu Feature baru akan dibuat."
+                : "Feature pertama yang dipilih menjadi target; atributnya dipertahankan dan Feature lain dihapus."}
+            </p>
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button type="button" disabled={topologySubmitting} onClick={() => { setTopologyConfirm(null); setTopologyAction(null); clearDraft(); }} className="min-h-11 rounded-xl px-4 text-sm font-semibold text-[#6b6760] transition hover:bg-[#f2f1ee] disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f6b5f]">Batal</button>
+              <button type="button" disabled={topologySubmitting} onClick={() => void applyTopology()} className="min-h-11 rounded-xl bg-[#c0392b] px-4 text-sm font-semibold text-white transition hover:bg-[#9e2e23] disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c0392b]">{topologySubmitting ? "Memproses…" : "Konfirmasi"}</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {settings ? (
+        <ProjectSettingsDialog
+          project={settings.mode === "edit" ? activeProject : null}
+          featureCount={features.length}
+          geofence={geofence}
+          geofenceLoading={geofenceLoading}
+          geofenceError={geofenceError}
+          geofenceDraft={{ drawing: geofenceDrawing, points: geofencePoints }}
+          geofenceApplying={geofenceApplying}
+          geofenceRemoving={geofenceRemoving}
+          onGeofenceStartDrawing={() => {
+            setGeofenceError(null);
+            setGeofencePoints([]);
+            setGeofenceDrawing(true);
+          }}
+          onGeofenceCancelDrawing={() => {
+            setGeofenceDrawing(false);
+            setGeofencePoints([]);
+          }}
+          onGeofenceApply={() => void applyGeofence()}
+          onGeofenceRemove={() => void removeGeofence()}
+          onClose={closeSettings}
+          onSaved={handleSettingsSaved}
         />
       ) : null}
 
