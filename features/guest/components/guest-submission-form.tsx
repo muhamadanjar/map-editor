@@ -330,19 +330,19 @@ export function GuestSubmissionForm({ project, slug }: GuestSubmissionFormProps)
           {step === "form" ? (
             <div className="space-y-6">
               {!project.otp_required ? <p className="flex items-center gap-2 rounded-xl bg-[#f2f1ee] px-3 py-2 text-sm text-[#5a5650]"><MailCheck className="size-4 text-[#0f6b5f]" aria-hidden="true" />Verifikasi email sementara dilewati pada environment ini.</p> : null}
-              <div className="grid gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(19rem,0.85fr)]">
-                <div className="space-y-3">
+              <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(19rem,0.85fr)]">
+                <div className="min-w-0 space-y-3">
                   <GuestDrawMap geometryType={project.geometry_type} drawing={drawing} draftGeometry={drawing ? draftGeometry : completedGeometry ?? draftGeometry} onCoordinate={onCoordinate} />
                   {fieldErrors.geometry ? <p className="text-sm text-[#8f2d23]">{fieldErrors.geometry}</p> : null}
-                  <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="primary" onClick={() => { setCoordinates([]); setDrawing(true); setError(null); }} className="min-h-11 gap-2"><MapPin className="size-4" aria-hidden="true" />{coordinates.length ? "Gambar ulang" : `Tambah ${project.geometry_type}`}</Button>
+                  <div aria-label="Kontrol gambar geometri" className="flex flex-wrap items-center gap-2">
+                    <Button type="button" variant="primary" aria-pressed={drawing} onClick={() => { setCoordinates([]); setDrawing(true); setError(null); }} className="min-h-11 gap-2"><MapPin className="size-4" aria-hidden="true" />{drawing ? "Sedang menggambar" : coordinates.length ? "Gambar ulang" : `Tambah ${project.geometry_type}`}</Button>
                     {project.geometry_type !== "point" ? <Button type="button" variant="default" onClick={() => { if (completedGeometry) setDrawing(false); else showError(`Tambahkan cukup titik untuk ${project.geometry_type}.`, { geometry: `Geometry ${project.geometry_type} belum lengkap.` }); }} className="min-h-11">Selesai bentuk</Button> : null}
                     {coordinates.length ? <Button type="button" variant="ghost" onClick={() => { setCoordinates([]); setDrawing(false); }} className="min-h-11 gap-2"><X className="size-4" aria-hidden="true" />Hapus</Button> : null}
                   </div>
-                  <p className="text-sm text-[#6b6760]">{completedGeometry ? `Siap: ${geometryLabel(completedGeometry)}.` : project.geometry_type === "polygon" ? "Polygon membutuhkan minimal tiga titik." : project.geometry_type === "line" ? "Line membutuhkan minimal dua titik." : "Pilih satu titik pada peta."}</p>
+                  <p aria-live="polite" className="text-sm text-[#6b6760]">{completedGeometry ? `Siap: ${geometryLabel(completedGeometry)}.` : drawing ? `Klik peta untuk menambahkan ${project.geometry_type === "point" ? "titik" : "vertex"}.` : project.geometry_type === "polygon" ? "Polygon membutuhkan minimal tiga titik. Tekan Tambah polygon untuk mulai." : project.geometry_type === "line" ? "Line membutuhkan minimal dua titik. Tekan Tambah line untuk mulai." : "Tekan Tambah point, lalu pilih lokasinya pada peta."}</p>
                 </div>
 
-                <div className="space-y-5 rounded-2xl border border-black/10 bg-[#fbfbfa] p-4 sm:p-5">
+                <div className="min-w-0 space-y-5 rounded-2xl border border-black/10 bg-[#fbfbfa] p-4 sm:p-5">
                   {project.form_schema.length ? project.form_schema.map((field) => (
                     <Field key={field.name} label={field.label} error={fieldErrors[field.name]} required={field.required}>
                       {field.type === "textarea" ? <textarea className={inputClass} aria-label={field.label} rows={4} value={attributes[field.name] ?? ""} onChange={(event) => setAttributes((current) => ({ ...current, [field.name]: event.target.value }))} aria-invalid={Boolean(fieldErrors[field.name])} /> : null}

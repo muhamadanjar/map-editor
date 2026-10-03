@@ -18,6 +18,8 @@ The public guest page lets a visitor submit one project feature without using th
 
 The page handles unavailable projects, validation errors, duplicate email submissions, and recoverable load errors without exposing existing project features or identity records.
 
+The map canvas resizes with its container and has a fixed responsive working height. To draw, activate the geometry button first, then click the map; the current drawing state and minimum point requirements are shown below the map. Navigation controls stay in the map corner, while drawing controls wrap below the map on narrow screens.
+
 ## Integration
 
 All calls use the existing same-origin Tileserver proxy at `/api/tileserver/api/v1/guest/...`. The browser never needs a Tileserver base URL or authentication token. The backend owns guest sessions, consent, OTP, duplicate checks, and creation of the final Feature.
