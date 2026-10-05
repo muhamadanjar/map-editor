@@ -1,0 +1,3 @@
+# UserManagement owns Map Editor authentication
+
+Map Editor supports UserManagement credentials and Google Sign-In for editor users, while guest users authenticate with Google and receive passwordless UserManagement accounts. UserManagement validates Google identities, owns account linking and guest provisioning, issues application sessions, and remains the source of Project authorization; this avoids split identity records and prevents a Google login from implicitly granting Project access. Editor Google identities must be explicitly linked, and an existing account with a matching email is never linked automatically.

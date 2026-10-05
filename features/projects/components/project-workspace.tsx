@@ -15,6 +15,7 @@ import {
   upsertProjectGeofence,
 } from "../api/projects-api";
 import type { FeatureGeometry, Position, Project } from "../types";
+import type { AccountProfile } from "@/features/auth/types";
 import { setProjectWorkspaceValue, useProjectWorkspaceStore } from "../stores/project-workspace-store";
 import { geofenceErrorMessage } from "./project-geofence-settings";
 import { FeatureInputDialog } from "./feature-input-dialog";
@@ -49,7 +50,7 @@ function sortByName(projects: Project[]): Project[] {
   return [...projects].sort((a, b) => a.name.localeCompare(b.name, "id"));
 }
 
-export function ProjectWorkspace() {
+export function ProjectWorkspace({ account }: { account: AccountProfile }) {
   const projects = useProjectWorkspaceStore((state) => state.projects);
   const activeProjectId = useProjectWorkspaceStore((state) => state.activeProjectId);
   const features = useProjectWorkspaceStore((state) => state.features);
@@ -498,12 +499,12 @@ export function ProjectWorkspace() {
       />
 
       <WorkspaceNavbar
+        account={account}
         projects={projects}
         activeProjectId={activeProjectId}
         activeProject={activeProject}
         featureCount={features.length}
         onProjectChange={requestProjectChange}
-        onLoginUnavailable={() => setNotice("Form login tersedia, tetapi layanan autentikasi belum dikonfigurasi.")}
       />
 
       {activeProject ? (

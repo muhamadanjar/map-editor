@@ -1,32 +1,21 @@
 "use client";
 
-import { ChevronDown, LogIn, MapPinned } from "lucide-react";
-import { type FormEvent, useState } from "react";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { ChevronDown, LogOut, MapPinned } from "lucide-react";
 import type { Project } from "../types";
+import type { AccountProfile } from "@/features/auth/types";
 
 type WorkspaceNavbarProps = {
+  account: AccountProfile;
   projects: Project[];
   activeProjectId: string | null;
   activeProject: Project | null;
   featureCount: number;
   onProjectChange: (projectId: string) => void;
-  onLoginUnavailable: () => void;
 };
 
 const geometryLabels: Record<Project["geometry_type"], string> = { point: "Point", line: "Line", polygon: "Polygon" };
 
-export function WorkspaceNavbar({ projects, activeProjectId, activeProject, featureCount, onProjectChange, onLoginUnavailable }: WorkspaceNavbarProps) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [feedback, setFeedback] = useState<string | null>(null);
-
-  const submitLogin = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setFeedback("Layanan autentikasi belum dikonfigurasi untuk Map Editor.");
-    onLoginUnavailable();
-  };
-
+export function WorkspaceNavbar({ account, projects, activeProjectId, activeProject, featureCount, onProjectChange }: WorkspaceNavbarProps) {
   return (
     <header id="workspace-controls" className="absolute inset-x-3 top-3 z-30 sm:inset-x-5 sm:top-5">
       <nav aria-label="Navigasi workspace" className="flex min-h-12 items-center justify-between gap-2 rounded-xl border border-black/10 bg-white/95 p-1.5 shadow-[0_5px_16px_rgba(28,27,25,0.12)] backdrop-blur">
@@ -51,31 +40,15 @@ export function WorkspaceNavbar({ projects, activeProjectId, activeProject, feat
 
         <div className="flex shrink-0 items-center gap-1.5">
           {activeProject ? <span className="hidden rounded-lg bg-[#f2f1ee] px-2.5 py-1.5 font-mono text-xs text-[#6b6760] md:inline">{geometryLabels[activeProject.geometry_type].toUpperCase()} · {featureCount} FEATURE</span> : null}
-          <Dialog onOpenChange={(open) => { if (!open) setFeedback(null); }}>
-            <DialogTrigger asChild>
-              <button type="button" className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-[#0f6b5f] px-3 text-sm font-semibold text-white transition-[background-color,transform] duration-200 hover:bg-[#0a5049] active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f6b5f]">
-                <LogIn className="size-4" aria-hidden="true" /><span className="hidden sm:inline">Masuk</span>
-              </button>
-            </DialogTrigger>
-            <DialogContent className="gap-5 rounded-2xl border-black/10 bg-white p-5 text-[#1c1b19] shadow-[0_18px_50px_rgba(28,27,25,0.24)] sm:max-w-md">
-              <DialogHeader className="text-left">
-                <DialogTitle>Masuk ke Map Editor</DialogTitle>
-                <DialogDescription className="leading-5 text-[#6b6760]">Gunakan akun organisasi Anda untuk mengelola data Project.</DialogDescription>
-              </DialogHeader>
-              <form className="grid gap-4" onSubmit={submitLogin}>
-                <div className="grid gap-2">
-                  <label htmlFor="login-email" className="text-sm font-semibold text-[#1c1b19]">Email</label>
-                  <input id="login-email" name="email" type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required className="min-h-11 rounded-xl border border-black/15 bg-[#fbfbfa] px-3 text-base text-[#1c1b19] outline-none placeholder:text-[#9c9890] focus:border-[#0f6b5f] focus:ring-2 focus:ring-[#0f6b5f]/25" placeholder="nama@organisasi.id" />
-                </div>
-                <div className="grid gap-2">
-                  <label htmlFor="login-password" className="text-sm font-semibold text-[#1c1b19]">Kata sandi</label>
-                  <input id="login-password" name="password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required className="min-h-11 rounded-xl border border-black/15 bg-[#fbfbfa] px-3 text-base text-[#1c1b19] outline-none placeholder:text-[#9c9890] focus:border-[#0f6b5f] focus:ring-2 focus:ring-[#0f6b5f]/25" placeholder="Masukkan kata sandi" />
-                </div>
-                {feedback ? <p role="status" className="rounded-xl bg-[#fff0ee] px-3 py-2 text-sm leading-5 text-[#8f2d23]">{feedback}</p> : null}
-                <button type="submit" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-[#0f6b5f] px-4 text-sm font-semibold text-white transition-[background-color,transform] duration-200 hover:bg-[#0a5049] active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f6b5f]">Masuk</button>
-              </form>
-            </DialogContent>
-          </Dialog>
+          <div className="flex min-w-0 max-w-20 flex-col text-right sm:max-w-44 lg:max-w-60" aria-label="Akun aktif">
+            <span className="truncate text-xs font-semibold leading-4 text-[#1c1b19]">{account.name || account.email || "Akun aktif"}</span>
+            {account.email ? <span className="truncate text-[10px] leading-4 text-[#6b6760]">{account.email}</span> : null}
+          </div>
+          <form action="/api/auth/logout" method="post">
+            <button type="submit" className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-black/10 bg-white px-3 text-sm font-semibold text-[#6b6760] transition hover:bg-[#f2f1ee] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f6b5f]">
+              <LogOut className="size-4" aria-hidden="true" /><span className="hidden sm:inline">Keluar</span>
+            </button>
+          </form>
         </div>
       </nav>
     </header>

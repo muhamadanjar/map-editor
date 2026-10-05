@@ -1,5 +1,5 @@
-import { ProjectWorkspace } from "../components/project-workspace";
+import { MapEditorAuthenticationView } from "@/features/auth/views/map-editor-authentication-view";
 
-export function ProjectWorkspaceView() {
-  return <ProjectWorkspace />;
+export function ProjectWorkspaceView({ authError }: { authError?: string }) {
+  return <MapEditorAuthenticationView authError={authError} />;
 }

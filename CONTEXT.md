@@ -35,3 +35,19 @@ _Avoid_: spreadsheet, feature editor
 **Basemap**:
 The OpenStreetMap reference map rendered beneath the active Project's saved Features and drawing draft.
 _Avoid_: project layer, feature layer
+
+**Editor User**:
+A UserManagement account with permission to open the Map Editor and access one or more Projects. A Google identity may authenticate this user only after it has been explicitly linked to that account.
+_Avoid_: Google-only editor, authenticated guest
+
+**Guest User**:
+A passwordless UserManagement account created through Google Sign-In for public Project submissions. Its guest role does not grant editor access; each guest submission remains scoped to the Project opened through its guest link.
+_Avoid_: anonymous submitter, editor account
+
+**Google Account Link**:
+An explicit association between a verified Google identity and an existing UserManagement account. Matching email addresses alone do not create this association.
+_Avoid_: email auto-link
+
+**Guest Submission Limit**:
+The rule that one Guest User may submit at most once to each Project. The same Guest User may submit to other Projects through their guest links.
+_Avoid_: one submission per email globally
