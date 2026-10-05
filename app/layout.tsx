@@ -17,6 +17,14 @@ const plexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "Map Editor",
   description: "Workspace input geometry dan data untuk Tileserver Project.",
+  icons: {
+    icon: [
+      { url: "/map-editor-icon.svg", type: "image/svg+xml" },
+      { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
+      { url: "/favicon.ico", sizes: "any" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
