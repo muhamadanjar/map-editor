@@ -1,9 +1,11 @@
 "use client";
 
 import { MapboxOverlay } from "@deck.gl/mapbox";
+import { GeoJsonLayer, ScatterplotLayer } from "@deck.gl/layers";
 import type { Layer } from "deck.gl";
 import { layerFactory } from "@muhamadanjar/layers/layer-factory";
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMap } from "maplibre-gl";
+import { toast } from "sonner";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { TerraDraw, TerraDrawLineStringMode, TerraDrawPointMode, TerraDrawPolygonMode, TerraDrawRectangleMode, TerraDrawSelectMode, type GeoJSONStoreFeatures } from "terra-draw";
 import { TerraDrawMapLibreGLAdapter } from "terra-draw-maplibre-gl-adapter";
@@ -29,6 +31,9 @@ const OSM_STYLE: maplibregl.StyleSpecification = {
 };
 
 const EMPTY_COLLECTION: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
+const EARTH_RADIUS_METERS = 6_371_008.8;
+
+type GpsLocation = { center: Position; accuracy: number };
 
 type ProjectMapProps = {
   project: Project | null;
@@ -103,6 +108,31 @@ function boundsForGeometries(geometries: FeatureGeometry[]): maplibregl.LngLatBo
     (bounds, coordinate) => bounds.extend(coordinate),
     new maplibregl.LngLatBounds(coordinates[0], coordinates[0]),
   );
+}
+
+function accuracyCircle(center: Position, accuracy: number): GeoJSON.Feature<GeoJSON.Polygon> {
+  const [longitude, latitude] = center;
+  const angularDistance = Math.max(accuracy, 1) / EARTH_RADIUS_METERS;
+  const latitudeRadians = latitude * Math.PI / 180;
+  const longitudeRadians = longitude * Math.PI / 180;
+  const ring = Array.from({ length: 65 }, (_, index) => {
+    const bearing = (index / 64) * 2 * Math.PI;
+    const destinationLatitude = Math.asin(
+      Math.sin(latitudeRadians) * Math.cos(angularDistance)
+      + Math.cos(latitudeRadians) * Math.sin(angularDistance) * Math.cos(bearing),
+    );
+    const destinationLongitude = longitudeRadians + Math.atan2(
+      Math.sin(bearing) * Math.sin(angularDistance) * Math.cos(latitudeRadians),
+      Math.cos(angularDistance) - Math.sin(latitudeRadians) * Math.sin(destinationLatitude),
+    );
+    return [destinationLongitude * 180 / Math.PI, destinationLatitude * 180 / Math.PI] as Position;
+  });
+
+  return {
+    type: "Feature",
+    properties: { accuracy },
+    geometry: { type: "Polygon", coordinates: [ring] },
+  };
 }
 
 function projectLayer(project: Project, revision: number): Layer | null {
@@ -197,6 +227,8 @@ export function ProjectMap({
   const onProjectFeatureSelectRef = useRef(onProjectFeatureSelect);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  const [gpsLocation, setGpsLocation] = useState<GpsLocation | null>(null);
+  const [isLocating, setIsLocating] = useState(false);
 
   useEffect(() => {
     onCoordinateRef.current = onCoordinate;
@@ -418,8 +450,36 @@ export function ProjectMap({
     const overlay = overlayRef.current;
     if (!overlay) return;
     const layer = project ? projectLayer(project, featureRevision) : null;
-    overlay.setProps({ layers: layer ? [layer] : [] });
-  }, [featureRevision, project]);
+    const layers: Layer[] = layer ? [layer] : [];
+    if (gpsLocation) {
+      layers.push(
+        new GeoJsonLayer({
+          id: "gps-accuracy-area",
+          data: { type: "FeatureCollection", features: [accuracyCircle(gpsLocation.center, gpsLocation.accuracy)] },
+          filled: true,
+          stroked: true,
+          getFillColor: [103, 162, 197, 48],
+          getLineColor: [15, 107, 95, 190],
+          getLineWidth: 1.5,
+          lineWidthUnits: "pixels",
+          pickable: false,
+        }),
+        new ScatterplotLayer({
+          id: "gps-location-point",
+          data: [{ position: gpsLocation.center }],
+          getPosition: (item) => item.position,
+          getRadius: 8,
+          radiusUnits: "pixels",
+          getFillColor: [15, 107, 95, 255],
+          getLineColor: [255, 255, 255, 255],
+          lineWidthMinPixels: 2,
+          stroked: true,
+          pickable: false,
+        }),
+      );
+    }
+    overlay.setProps({ layers });
+  }, [featureRevision, gpsLocation, project]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -455,6 +515,41 @@ export function ProjectMap({
     map.fitBounds(bounds, { padding: { top: 132, right: 92, bottom: 116, left: 92 }, duration: 550, maxZoom: 16 });
   };
 
+  const locateUser = () => {
+    if (!navigator.geolocation) {
+      toast.error("Fitur lokasi tidak tersedia di browser atau koneksi saat ini.");
+      return;
+    }
+
+    setIsLocating(true);
+    try {
+      navigator.geolocation.getCurrentPosition(
+        ({ coords }) => {
+          const location = {
+            center: [coords.longitude, coords.latitude] as Position,
+            accuracy: coords.accuracy,
+          };
+          setGpsLocation(location);
+          mapRef.current?.flyTo({ center: location.center, zoom: 16, duration: 550 });
+          setIsLocating(false);
+        },
+        (error) => {
+          const message = error.code === error.PERMISSION_DENIED
+            ? "Izin lokasi ditolak. Aktifkan izin lokasi untuk menggunakan fitur ini."
+            : error.code === error.POSITION_UNAVAILABLE
+              ? "Lokasi tidak tersedia. Periksa pengaturan lokasi perangkat Anda."
+              : "Permintaan lokasi melewati batas waktu. Coba lagi.";
+          toast.error(message);
+          setIsLocating(false);
+        },
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 10_000 },
+      );
+    } catch {
+      toast.error("Permintaan lokasi tidak dapat dimulai. Coba lagi.");
+      setIsLocating(false);
+    }
+  };
+
   const clearEditorDraft = () => {
     drawRef.current?.clear();
     onDraftGeometryChangeRef.current(null);
@@ -468,6 +563,8 @@ export function ProjectMap({
       <MapNavigationControls
         onZoomIn={() => mapRef.current?.zoomIn({ duration: 180 })}
         onZoomOut={() => mapRef.current?.zoomOut({ duration: 180 })}
+        onLocate={locateUser}
+        isLocating={isLocating}
         onResetNorth={() => mapRef.current?.easeTo({ bearing: 0, pitch: 0, duration: 180 })}
         onFocusWorkspace={focusWorkspace}
       />
