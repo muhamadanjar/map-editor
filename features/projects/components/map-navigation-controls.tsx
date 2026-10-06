@@ -3,8 +3,8 @@ import { Compass, Locate, LocateFixed, Loader2, Minus, Plus } from "lucide-react
 type MapNavigationControlsProps = {
   onZoomIn: () => void;
   onZoomOut: () => void;
-  onLocate: () => void;
-  isLocating: boolean;
+  onLocate?: () => void;
+  isLocating?: boolean;
   onResetNorth: () => void;
   onFocusWorkspace: () => void;
 };
@@ -20,17 +20,19 @@ export function MapNavigationControls({ onZoomIn, onZoomOut, onLocate, isLocatin
       <button type="button" onClick={onZoomOut} aria-label="Perkecil peta" title="Perkecil peta" className={`${controlClass} border-b border-black/10`}>
         <Minus className="size-4" aria-hidden="true" />
       </button>
-      <button
-        type="button"
-        onClick={onLocate}
-        disabled={isLocating}
-        aria-label={isLocating ? "Mencari lokasi GPS" : "Tampilkan lokasi saya"}
-        aria-busy={isLocating}
-        title={isLocating ? "Mencari lokasi GPS" : "Tampilkan lokasi saya"}
-        className={`${controlClass} border-b border-black/10 text-[#0f6b5f] disabled:cursor-wait disabled:opacity-60`}
-      >
-        {isLocating ? <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : <Locate className="size-4" aria-hidden="true" />}
-      </button>
+      {onLocate ? (
+        <button
+          type="button"
+          onClick={onLocate}
+          disabled={isLocating}
+          aria-label={isLocating ? "Mencari lokasi GPS" : "Tampilkan lokasi saya"}
+          aria-busy={isLocating}
+          title={isLocating ? "Mencari lokasi GPS" : "Tampilkan lokasi saya"}
+          className={`${controlClass} border-b border-black/10 text-[#0f6b5f] disabled:cursor-wait disabled:opacity-60`}
+        >
+          {isLocating ? <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : <Locate className="size-4" aria-hidden="true" />}
+        </button>
+      ) : null}
       <button type="button" onClick={onResetNorth} aria-label="Kembalikan orientasi utara" title="Kembalikan orientasi utara" className={`${controlClass} border-b border-black/10`}>
         <Compass className="size-4" aria-hidden="true" />
       </button>

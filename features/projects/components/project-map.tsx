@@ -1,7 +1,7 @@
 "use client";
 
 import { MapboxOverlay } from "@deck.gl/mapbox";
-import { GeoJsonLayer, ScatterplotLayer } from "@deck.gl/layers";
+import { GeoJsonLayer } from "@deck.gl/layers";
 import type { Layer } from "deck.gl";
 import { layerFactory } from "@muhamadanjar/layers/layer-factory";
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMap } from "maplibre-gl";
@@ -208,6 +208,7 @@ export function ProjectMap({
 }: ProjectMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
+  const gpsMarkerRef = useRef<maplibregl.Marker | null>(null);
   const overlayRef = useRef<MapboxOverlay | null>(null);
   const drawRef = useRef<TerraDraw | null>(null);
   const onCoordinateRef = useRef(onCoordinate);
@@ -422,6 +423,8 @@ export function ProjectMap({
       map.boxZoom.enable();
       drawRef.current?.stop();
       drawRef.current = null;
+      gpsMarkerRef.current?.remove();
+      gpsMarkerRef.current = null;
       overlayRef.current = null;
       mapRef.current = null;
       map.remove();
@@ -447,6 +450,29 @@ export function ProjectMap({
   }, [draftFeatureId, editorSession]);
 
   useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !gpsLocation) return;
+    if (gpsMarkerRef.current) {
+      gpsMarkerRef.current.setLngLat(gpsLocation.center);
+      return;
+    }
+
+    const markerElement = document.createElement("div");
+    markerElement.className = "pointer-events-none relative grid size-8 place-items-center";
+    markerElement.setAttribute("aria-hidden", "true");
+
+    const pulse = document.createElement("span");
+    pulse.className = "absolute size-6 rounded-full bg-[#67a2c5]/40 motion-safe:animate-ping";
+    const dot = document.createElement("span");
+    dot.className = "relative z-10 size-3 rounded-full border-2 border-white bg-[#0f6b5f] shadow-[0_1px_4px_rgba(28,27,25,0.4)]";
+    markerElement.append(pulse, dot);
+
+    gpsMarkerRef.current = new maplibregl.Marker({ element: markerElement, anchor: "center" })
+      .setLngLat(gpsLocation.center)
+      .addTo(map);
+  }, [gpsLocation]);
+
+  useEffect(() => {
     const overlay = overlayRef.current;
     if (!overlay) return;
     const layer = project ? projectLayer(project, featureRevision) : null;
@@ -459,21 +485,9 @@ export function ProjectMap({
           filled: true,
           stroked: true,
           getFillColor: [103, 162, 197, 48],
-          getLineColor: [15, 107, 95, 190],
+          getLineColor: [103, 162, 197, 210],
           getLineWidth: 1.5,
           lineWidthUnits: "pixels",
-          pickable: false,
-        }),
-        new ScatterplotLayer({
-          id: "gps-location-point",
-          data: [{ position: gpsLocation.center }],
-          getPosition: (item) => item.position,
-          getRadius: 8,
-          radiusUnits: "pixels",
-          getFillColor: [15, 107, 95, 255],
-          getLineColor: [255, 255, 255, 255],
-          lineWidthMinPixels: 2,
-          stroked: true,
           pickable: false,
         }),
       );

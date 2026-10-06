@@ -10,6 +10,7 @@ Plan: [Project Feature Update](../plans/project-feature-update.md)
 - [x] Inspect exact TileServer request/response and validation contract.
 - [x] Implement saved geometry editing, attribute panel, and API client integration.
 - [x] Add final feature documentation and record validation scope.
+- [x] Add animated soft-blue GPS radius and document the location indicator.
 
 ## Findings
 

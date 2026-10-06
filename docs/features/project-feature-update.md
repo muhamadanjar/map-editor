@@ -21,3 +21,7 @@ Penyuntingan memakai skema form Project. ID, metadata sistem, dan field lampiran
 ## Kontrak penyimpanan
 
 Map Editor mengirim `PATCH /api/tileserver/api/v1/projects/{project_id}/features/{feature_id}` dengan `geometry` dan `attributes`. Atribut lampiran yang tidak dikirim tetap dipertahankan oleh operasi merge atribut TileServer.
+
+## Indikator GPS
+
+Saat lokasi perangkat ditemukan, peta menampilkan radius akurasi berwarna soft blue dan pulse lembut di titik lokasi. Pulse mengikuti preferensi reduced-motion perangkat.

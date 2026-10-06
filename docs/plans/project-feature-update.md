@@ -16,6 +16,7 @@ Let an editor update a saved Project Feature's schema-backed attributes and geom
 - Validate geometry against the Project geometry type and required attributes before save; TileServer remains authoritative.
 - Keep the draft and form values after a failed request so the user can retry.
 - Confirm before discarding unsaved changes.
+- Show GPS accuracy with a soft-blue radius and a subtle location pulse; respect reduced-motion preferences.
 
 ## Existing implementation and API
 
@@ -43,6 +44,7 @@ Let an editor update a saved Project Feature's schema-backed attributes and geom
 - Failure preserves all edits and shows the API error for retry.
 - Canceling a dirty edit requires confirmation; confirming restores the original feature and values.
 - Invalid geometry or required values cannot be submitted, and the server remains authoritative.
+- GPS accuracy remains visible as a soft-blue radius, with a soft-blue pulse centered on the current fix.
 
 ## Constraints
 
