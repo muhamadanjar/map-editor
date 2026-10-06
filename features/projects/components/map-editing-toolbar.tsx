@@ -23,6 +23,7 @@ type EditingToolbarProps = {
   geometryType: GeometryType;
   activeMode: MapEditorMode | null;
   hasDraft: boolean;
+  editingSavedFeature: boolean;
   canUndo: boolean;
   canRedo: boolean;
   featureSelectionMode: boolean;
@@ -57,7 +58,7 @@ function ToolbarButton({ label, active = false, disabled = false, onClick, child
   );
 }
 
-export function MapEditingToolbar({ geometryType, activeMode, hasDraft, canUndo, canRedo, featureSelectionMode, selectedFeatureCount, tableOpen, onModeChange, onUndo, onRedo, onClear, onFeatureSelectionModeChange, onTableToggle, canDelete, onDelete, canCut, canMerge, onCut, onMerge }: EditingToolbarProps) {
+export function MapEditingToolbar({ geometryType, activeMode, hasDraft, editingSavedFeature, canUndo, canRedo, featureSelectionMode, selectedFeatureCount, tableOpen, onModeChange, onUndo, onRedo, onClear, onFeatureSelectionModeChange, onTableToggle, canDelete, onDelete, canCut, canMerge, onCut, onMerge }: EditingToolbarProps) {
   const [expanded, setExpanded] = useState(false);
   const geometryName = geometryType === "point" ? "titik" : geometryType === "line" ? "garis" : "poligon";
 
@@ -88,7 +89,7 @@ export function MapEditingToolbar({ geometryType, activeMode, hasDraft, canUndo,
               <span className="h-6 border-l border-black/10" aria-hidden="true" />
               <ToolbarButton label="Urungkan perubahan sketsa" disabled={!canUndo} onClick={onUndo}><Undo2 className="size-4" aria-hidden="true" /></ToolbarButton>
               <ToolbarButton label="Ulangi perubahan sketsa" disabled={!canRedo} onClick={onRedo}><Redo2 className="size-4" aria-hidden="true" /></ToolbarButton>
-              <ToolbarButton label="Hapus sketsa aktif" disabled={!hasDraft} onClick={onClear}><Eraser className="size-4 text-[#c0392b]" aria-hidden="true" /></ToolbarButton>
+              <ToolbarButton label={editingSavedFeature ? "Batalkan edit melalui panel Feature" : "Hapus sketsa aktif"} disabled={!hasDraft || editingSavedFeature} onClick={onClear}><Eraser className="size-4 text-[#c0392b]" aria-hidden="true" /></ToolbarButton>
               <span className="h-6 border-l border-black/10" aria-hidden="true" />
               <ToolbarButton label={canDelete ? "Hapus Feature terpilih" : "Pilih satu atau lebih Feature untuk dihapus"} disabled={!canDelete} onClick={onDelete}><Trash2 className="size-4 text-[#c0392b]" aria-hidden="true" /></ToolbarButton>
               <ToolbarButton label={canCut ? "Potong Feature terpilih" : "Pilih satu Feature Polygon untuk dipotong"} disabled={!canCut} onClick={onCut}><Scissors className="size-4" aria-hidden="true" /></ToolbarButton>

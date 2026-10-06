@@ -72,7 +72,12 @@ export interface ProjectFeature {
 
 export interface CreateFeatureInput {
   geometry: FeatureGeometry;
-  attributes: Record<string, string | number | null>;
+  attributes: Record<string, string | number | boolean | string[] | null>;
+}
+
+export interface UpdateFeatureInput {
+  geometry: FeatureGeometry;
+  attributes: Record<string, string | number | boolean | string[] | null>;
 }
 
 export interface FeatureTopologyResult {

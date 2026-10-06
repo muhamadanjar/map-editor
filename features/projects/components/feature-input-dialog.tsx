@@ -6,10 +6,11 @@ import type { Project } from "../types";
 
 type FeatureInputDialogProps = {
   project: Project;
-  values: Record<string, string>;
+  values: Record<string, string | boolean | string[] | number | null>;
+  mode?: "create" | "edit";
   submitting: boolean;
   error: string | null;
-  onChange: (name: string, value: string) => void;
+  onChange: (name: string, value: string | boolean | string[]) => void;
   onClose: () => void;
   onSubmit: () => void;
 };
@@ -17,6 +18,7 @@ type FeatureInputDialogProps = {
 export function FeatureInputDialog({
   project,
   values,
+  mode = "create",
   submitting,
   error,
   onChange,
@@ -40,24 +42,27 @@ export function FeatureInputDialog({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose, submitting]);
 
+  const editing = mode === "edit";
+
   return (
-    <div className="fixed inset-0 z-50 grid items-end bg-black/35 p-0 sm:place-items-center sm:p-6" role="presentation">
-      <div
-        role="dialog"
-        aria-modal="true"
+    <div className={editing ? "pointer-events-none absolute inset-x-3 top-16 z-30 sm:inset-x-auto sm:right-5 sm:top-20 sm:w-[min(26rem,calc(100vw-2.5rem))]" : "fixed inset-0 z-50 grid items-end bg-black/35 p-0 sm:place-items-center sm:p-6"} role={editing ? undefined : "presentation"}>
+      <section
+        role={editing ? undefined : "dialog"}
+        aria-modal={editing ? undefined : true}
         aria-labelledby="feature-form-title"
-        className="max-h-[88dvh] w-full overflow-y-auto rounded-t-2xl border border-black/10 bg-white shadow-[0_-12px_32px_rgba(28,27,25,0.18)] sm:max-w-lg sm:rounded-2xl sm:shadow-[0_18px_50px_rgba(28,27,25,0.24)]"
+        aria-label={editing ? `Edit Feature ${project.name}` : undefined}
+        className={`${editing ? "pointer-events-auto max-h-[43dvh] w-full rounded-2xl shadow-[0_12px_32px_rgba(28,27,25,0.2)] sm:max-h-[min(76dvh,48rem)]" : "max-h-[88dvh] w-full rounded-t-2xl shadow-[0_-12px_32px_rgba(28,27,25,0.18)] sm:max-w-lg sm:rounded-2xl sm:shadow-[0_18px_50px_rgba(28,27,25,0.24)]"} overflow-y-auto border border-black/10 bg-white`}
       >
         <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-black/10 bg-white px-5 py-4">
           <div>
-            <p className="text-xs font-medium uppercase tracking-[0.16em] text-[#0f6b5f]">Feature baru · {project.geometry_type}</p>
-            <h2 id="feature-form-title" className="mt-1 text-lg font-semibold text-[#1c1b19]">Input data {project.name}</h2>
+            <p className="text-xs font-medium uppercase tracking-[0.16em] text-[#0f6b5f]">{editing ? "Edit Feature" : "Feature baru"} · {project.geometry_type}</p>
+            <h2 id="feature-form-title" className="mt-1 text-lg font-semibold text-[#1c1b19]">{editing ? `Perbarui data ${project.name}` : `Input data ${project.name}`}</h2>
           </div>
           <button
             type="button"
             onClick={onClose}
             disabled={submitting}
-            aria-label="Batalkan input Feature"
+            aria-label={editing ? "Batalkan edit Feature" : "Batalkan input Feature"}
             className="grid size-10 shrink-0 place-items-center rounded-xl text-[#6b6760] transition hover:bg-[#f2f1ee] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f6b5f]"
           >
             <X className="size-5" aria-hidden="true" />
@@ -88,7 +93,7 @@ export function FeatureInputDialog({
               name: field.name,
               required: field.required,
               disabled: submitting,
-              value: values[field.name] ?? "",
+              value: typeof values[field.name] === "string" || typeof values[field.name] === "number" ? String(values[field.name]) : "",
               onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => onChange(field.name, event.target.value),
               ref: index === 0 ? attachFirstField : undefined,
               className: "mt-1.5 min-h-11 w-full rounded-xl border border-black/15 bg-white px-3 py-2.5 text-sm text-[#1c1b19] shadow-sm outline-none transition placeholder:text-[#9c9890] focus:border-[#0f6b5f] focus:ring-2 focus:ring-[#0f6b5f]/20 disabled:cursor-not-allowed disabled:bg-[#f2f1ee]",
@@ -97,7 +102,7 @@ export function FeatureInputDialog({
             return (
               <div key={field.name}>
                 <label htmlFor={inputId} className="text-sm font-semibold text-[#1c1b19]">
-                  {field.label} {field.required ? <span className="text-[#c0392b]">*</span> : null}
+                  {field.label} {field.required && field.type !== "file" ? <span className="text-[#c0392b]">*</span> : null}
                 </label>
                 {field.type === "textarea" ? <textarea rows={4} {...common} /> : null}
                 {field.type === "select" ? (
@@ -105,6 +110,15 @@ export function FeatureInputDialog({
                     <option value="">Pilih {field.label}</option>
                     {field.options?.map((option) => <option key={option} value={option}>{option}</option>)}
                   </select>
+                ) : null}
+                {field.type === "multiselect" ? (
+                  <select {...common} multiple value={Array.isArray(values[field.name]) ? values[field.name] as string[] : []} onChange={(event) => onChange(field.name, Array.from(event.target.selectedOptions, (option) => option.value))}>
+                    {field.options?.map((option) => <option key={option} value={option}>{option}</option>)}
+                  </select>
+                ) : null}
+                {field.type === "date" ? <input type="date" {...common} /> : null}
+                {field.type === "checkbox" ? (
+                  <input id={inputId} name={field.name} type="checkbox" required={field.required} disabled={submitting} checked={Boolean(values[field.name])} onChange={(event) => onChange(field.name, event.target.checked)} className="mt-2 size-4 accent-[#0f6b5f] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f6b5f] disabled:opacity-50" />
                 ) : null}
                 {field.type === "number" ? <input type="number" min={field.min} max={field.max} inputMode="decimal" {...common} /> : null}
                 {field.type === "file" ? (
@@ -130,7 +144,7 @@ export function FeatureInputDialog({
             </button>
           </div>
         </form>
-      </div>
+      </section>
     </div>
   );
 }

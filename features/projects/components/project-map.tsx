@@ -5,7 +5,7 @@ import type { Layer } from "deck.gl";
 import { layerFactory } from "@muhamadanjar/layers/layer-factory";
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMap } from "maplibre-gl";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { TerraDraw, TerraDrawLineStringMode, TerraDrawPointMode, TerraDrawPolygonMode, TerraDrawRectangleMode, TerraDrawSelectMode } from "terra-draw";
+import { TerraDraw, TerraDrawLineStringMode, TerraDrawPointMode, TerraDrawPolygonMode, TerraDrawRectangleMode, TerraDrawSelectMode, type GeoJSONStoreFeatures } from "terra-draw";
 import { TerraDrawMapLibreGLAdapter } from "terra-draw-maplibre-gl-adapter";
 import { projectGeoJsonUrl } from "../api/projects-api";
 import type { FeatureGeometry, GeometryType, Position, Project } from "../types";
@@ -44,6 +44,8 @@ type ProjectMapProps = {
   selectedFeatureGeometries: FeatureGeometry[];
   onCoordinate: (coordinate: Position) => void;
   editorSession: number;
+  draftFeatureId: string | null;
+  editingSavedFeature: boolean;
   editorMode: MapEditorMode | null;
   onDraftGeometryChange: (geometry: FeatureGeometry | null) => void;
   onEditorModeChange: (mode: MapEditorMode) => void;
@@ -70,6 +72,14 @@ function asFeatureGeometry(geometry: GeoJSON.Geometry): FeatureGeometry | null {
 
 function geometryToCollection(geometry: FeatureGeometry | null): GeoJSON.FeatureCollection {
   return geometriesToCollection(geometry ? [geometry] : []);
+}
+
+function seedEditorFeature(draw: TerraDraw, featureId: string, geometry: FeatureGeometry): void {
+  const mode = geometry.type === "Point" ? "point" : geometry.type === "LineString" ? "linestring" : "polygon";
+  const feature: GeoJSONStoreFeatures = { type: "Feature", id: featureId, properties: { mode }, geometry };
+  draw.addFeatures([feature]);
+  draw.selectFeature(featureId);
+  draw.clearUndoRedoHistory();
 }
 
 function geometriesToCollection(geometries: FeatureGeometry[]): GeoJSON.FeatureCollection {
@@ -148,6 +158,8 @@ export function ProjectMap({
   selectedFeatureGeometries,
   onCoordinate,
   editorSession,
+  draftFeatureId,
+  editingSavedFeature,
   editorMode,
   onDraftGeometryChange,
   onEditorModeChange,
@@ -173,6 +185,7 @@ export function ProjectMap({
   const geometryTypeRef = useRef<GeometryType | null>(project?.geometry_type ?? null);
   const drawGeometryTypeRef = useRef<GeometryType | null>(drawGeometryType);
   const draftGeometryRef = useRef(draftGeometry);
+  const draftFeatureIdRef = useRef(draftFeatureId);
   const geofenceRef = useRef(geofenceGeometry);
   const projectFeaturesRef = useRef(projectFeatures);
   const selectedFeatureGeometriesRef = useRef(selectedFeatureGeometries);
@@ -201,7 +214,8 @@ export function ProjectMap({
     onEditorModeChangeRef.current = onEditorModeChange;
     onProjectFeatureSelectRef.current = onProjectFeatureSelect;
     projectFeaturesRef.current = projectFeatures;
-  }, [drawing, drawGeometryType, editorMode, featureSelectionMode, onCoordinate, onDraftGeometryChange, onEditorModeChange, onProjectFeatureSelect, project?.geometry_type, projectFeatures]);
+    draftFeatureIdRef.current = draftFeatureId;
+  }, [draftFeatureId, drawing, drawGeometryType, editorMode, featureSelectionMode, onCoordinate, onDraftGeometryChange, onEditorModeChange, onProjectFeatureSelect, project?.geometry_type, projectFeatures]);
 
   useEffect(() => {
     draftGeometryRef.current = draftGeometry;
@@ -262,7 +276,13 @@ export function ProjectMap({
           new TerraDrawLineStringMode(),
           new TerraDrawPolygonMode(),
           new TerraDrawRectangleMode(),
-          new TerraDrawSelectMode(),
+          new TerraDrawSelectMode({
+            flags: {
+              point: { feature: { draggable: true, coordinates: { draggable: true, deletable: true } } },
+              linestring: { feature: { draggable: true, coordinates: { draggable: true, midpoints: { draggable: true }, deletable: true } } },
+              polygon: { feature: { draggable: true, coordinates: { draggable: true, midpoints: { draggable: true }, deletable: true } } },
+            },
+          }),
         ],
       });
       const syncDraft = () => {
@@ -282,6 +302,10 @@ export function ProjectMap({
       });
       draw.start();
       draw.setMode(editorModeRef.current ?? "select");
+      const initialDraft = draftGeometryRef.current;
+      if (initialDraft && draftFeatureIdRef.current) {
+        seedEditorFeature(draw, draftFeatureIdRef.current, initialDraft);
+      }
       drawRef.current = draw;
 
       map.addSource("project-draft", { type: "geojson", data: EMPTY_COLLECTION });
@@ -382,9 +406,13 @@ export function ProjectMap({
     const draw = drawRef.current;
     if (!draw) return;
     draw.clear();
+    const seedGeometry = draftGeometryRef.current;
+    if (seedGeometry && draftFeatureId) {
+      seedEditorFeature(draw, draftFeatureId, seedGeometry);
+    }
     setCanUndo(false);
     setCanRedo(false);
-  }, [editorSession]);
+  }, [draftFeatureId, editorSession]);
 
   useEffect(() => {
     const overlay = overlayRef.current;
@@ -450,6 +478,7 @@ export function ProjectMap({
           hasDraft={Boolean(draftGeometry)}
           canUndo={canUndo}
           canRedo={canRedo}
+          editingSavedFeature={editingSavedFeature}
           onModeChange={onEditorModeChange}
           onUndo={() => {
             drawRef.current?.undo();

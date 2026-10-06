@@ -13,8 +13,9 @@ import {
   mergeProjectFeatures,
   ProjectsApiError,
   upsertProjectGeofence,
+  updateProjectFeature,
 } from "../api/projects-api";
-import type { FeatureGeometry, Position, Project } from "../types";
+import type { FeatureGeometry, Position, Project, ProjectFeature } from "../types";
 import type { AccountProfile } from "@/features/auth/types";
 import { setProjectWorkspaceValue, useProjectWorkspaceStore } from "../stores/project-workspace-store";
 import { geofenceErrorMessage } from "./project-geofence-settings";
@@ -45,6 +46,26 @@ function geometryIsValidForProject(type: Project["geometry_type"], geometry: Fea
 
 type SettingsState = { open: boolean; mode: "create" | "edit" } | null;
 type TopologyAction = { kind: "cut"; targetId: string } | { kind: "merge"; targetId: string; sourceIds: string[] };
+type FeatureFormValue = string | boolean | string[] | number | null;
+
+function valuesFromFeature(project: Project, feature: ProjectFeature): Record<string, FeatureFormValue> {
+  return Object.fromEntries(project.form_schema.filter((field) => field.type !== "file").map((field) => {
+    const value = feature.attributes[field.name];
+    if (field.type === "checkbox") return [field.name, value === true || value === "true" || value === 1];
+    if (field.type === "multiselect") return [field.name, Array.isArray(value) ? value.map(String) : []];
+    return [field.name, value == null ? "" : String(value)];
+  }));
+}
+
+function attributesFromForm(project: Project, values: Record<string, FeatureFormValue>) {
+  return Object.fromEntries(project.form_schema.filter((field) => field.type !== "file").map((field) => {
+    const value = values[field.name];
+    if (field.type === "number") return [field.name, value === "" || value == null ? null : Number(value)];
+    if (field.type === "checkbox") return [field.name, Boolean(value)];
+    if (field.type === "multiselect") return [field.name, Array.isArray(value) ? value : []];
+    return [field.name, typeof value === "string" ? value || null : null];
+  }));
+}
 
 function sortByName(projects: Project[]): Project[] {
   return [...projects].sort((a, b) => a.name.localeCompare(b.name, "id"));
@@ -68,12 +89,16 @@ export function ProjectWorkspace({ account }: { account: AccountProfile }) {
   const resetWorkspaceStore = useProjectWorkspaceStore((state) => state.reset);
   const activateProjectData = useProjectWorkspaceStore((state) => state.activateProject);
   const clearDraftData = useProjectWorkspaceStore((state) => state.clearDraft);
+  const beginDraftData = useProjectWorkspaceStore((state) => state.beginDraft);
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [projectsError, setProjectsError] = useState<string | null>(null);
   const [featuresLoading, setFeaturesLoading] = useState(false);
   const [featuresError, setFeaturesError] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
-  const [formValues, setFormValues] = useState<Record<string, string>>({});
+  const [formValues, setFormValues] = useState<Record<string, FeatureFormValue>>({});
+  const [initialEditValues, setInitialEditValues] = useState<Record<string, FeatureFormValue>>({});
+  const [editingFeatureId, setEditingFeatureId] = useState<string | null>(null);
+  const [discardEditConfirm, setDiscardEditConfirm] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [pendingProjectId, setPendingProjectId] = useState<string | null>(null);
@@ -101,11 +126,24 @@ export function ProjectWorkspace({ account }: { account: AccountProfile }) {
     [features, selectedFeatureIds],
   );
 
+  const editingFeature = useMemo(
+    () => features.find((feature) => feature.id === editingFeatureId) ?? null,
+    [editingFeatureId, features],
+  );
+  const editIsDirty = Boolean(editingFeature && (
+    JSON.stringify(draftGeometry) !== JSON.stringify(editingFeature.geometry)
+    || JSON.stringify(formValues) !== JSON.stringify(initialEditValues)
+  ));
+
   const clearDraft = useCallback(() => {
     clearDraftData();
+    setProjectWorkspaceValue("selectedFeatureIds", []);
     setFormValues({});
     setFormError(null);
     setFormOpen(false);
+    setEditingFeatureId(null);
+    setInitialEditValues({});
+    setDiscardEditConfirm(false);
   }, [clearDraftData]);
 
   const loadProjects = useCallback(async () => {
@@ -207,19 +245,46 @@ export function ProjectWorkspace({ account }: { account: AccountProfile }) {
     setFormValues({});
     setFormError(null);
     setFormOpen(false);
+    setEditingFeatureId(null);
+    setInitialEditValues({});
+    setDiscardEditConfirm(false);
     setFeaturesError(null);
   }, [activateProjectData]);
 
   const requestProjectChange = useCallback((projectId: string) => {
     if (projectId === activeProjectId) return;
-    const hasDraft = drawing || draftGeometry !== null || formOpen;
+    const hasDraft = editingFeatureId ? editIsDirty : drawing || draftGeometry !== null || formOpen;
     if (hasDraft) {
       setPendingProjectId(projectId);
       setSwitchConfirmOpen(true);
       return;
     }
     activateProject(projectId);
-  }, [activateProject, activeProjectId, draftGeometry, drawing, formOpen]);
+  }, [activateProject, activeProjectId, draftGeometry, drawing, editIsDirty, editingFeatureId, formOpen]);
+
+  const startFeatureEdit = useCallback((feature: ProjectFeature) => {
+    if (!activeProject || drawing || formOpen) return;
+    const values = valuesFromFeature(activeProject, feature);
+    clearDraft();
+    setEditingFeatureId(feature.id);
+    setInitialEditValues(values);
+    setFormValues(values);
+    setFormError(null);
+    setFormOpen(true);
+    setProjectWorkspaceValue("featureSelectionMode", false);
+    setProjectWorkspaceValue("selectedFeatureIds", [feature.id]);
+    setTableOpen(false);
+    setProjectWorkspaceValue("focusGeometry", { ...feature.geometry });
+    beginDraftData(feature.geometry, "select");
+  }, [activeProject, beginDraftData, clearDraft, drawing, formOpen]);
+
+  const requestCloseForm = useCallback(() => {
+    if (editingFeatureId && editIsDirty) {
+      setDiscardEditConfirm(true);
+      return;
+    }
+    clearDraft();
+  }, [clearDraft, editIsDirty, editingFeatureId]);
 
   const handleCoordinate = useCallback((coordinate: Position) => {
     if (geofenceDrawing) {
@@ -347,35 +412,37 @@ export function ProjectWorkspace({ account }: { account: AccountProfile }) {
   const submitFeature = useCallback(async () => {
     if (!activeProject || !draftGeometry) return;
     const requiredFile = activeProject.form_schema.find((field) => field.type === "file" && field.required);
-    if (requiredFile) {
+    if (!editingFeatureId && requiredFile) {
       setFormError(`Field ${requiredFile.label} wajib diisi melalui aplikasi pengelolaan data.`);
       return;
     }
+    if (!geometryIsValidForProject(activeProject.geometry_type, draftGeometry)) {
+      setFormError(`Geometri harus berupa ${geometryLabels[activeProject.geometry_type]} yang valid.`);
+      return;
+    }
 
-    const attributes = Object.fromEntries(
-      activeProject.form_schema
-        .filter((field) => field.type !== "file")
-        .map((field) => {
-          const value = formValues[field.name] ?? "";
-          if (field.type === "number" && value !== "") return [field.name, Number(value)];
-          return [field.name, value || null];
-        }),
-    );
+    const attributes = attributesFromForm(activeProject, formValues);
 
     setSubmitting(true);
     setFormError(null);
     try {
-      const created = await createProjectFeature(activeProject.id, { geometry: draftGeometry, attributes });
-      setProjectWorkspaceValue("features", (current) => [...current, created]);
+      if (editingFeatureId) {
+        const updated = await updateProjectFeature(activeProject.id, editingFeatureId, { geometry: draftGeometry, attributes });
+        setProjectWorkspaceValue("features", (current) => current.map((feature) => feature.id === updated.id ? updated : feature));
+        setNotice("Perubahan Feature tersimpan di Tileserver.");
+      } else {
+        const created = await createProjectFeature(activeProject.id, { geometry: draftGeometry, attributes });
+        setProjectWorkspaceValue("features", (current) => [...current, created]);
+        setNotice("Feature baru tersimpan di Tileserver.");
+      }
       setProjectWorkspaceValue("featureRevision", (revision) => revision + 1);
-      setNotice("Feature baru tersimpan di Tileserver.");
       clearDraft();
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Feature tidak dapat disimpan.");
     } finally {
       setSubmitting(false);
     }
-  }, [activeProject, clearDraft, draftGeometry, formValues]);
+  }, [activeProject, clearDraft, draftGeometry, editingFeatureId, formValues]);
 
   const hasValidDraft = activeProject ? geometryIsValidForProject(activeProject.geometry_type, draftGeometry) : false;
 
@@ -478,9 +545,11 @@ export function ProjectWorkspace({ account }: { account: AccountProfile }) {
         focusGeometry={focusGeometry}
         workspaceGeometries={features.map((feature) => feature.geometry)}
         projectFeatures={features.map((feature) => ({ id: feature.id, geometry: feature.geometry }))}
-        selectedFeatureGeometries={features.filter((feature) => activeSelection.includes(feature.id)).map((feature) => feature.geometry)}
+        selectedFeatureGeometries={features.filter((feature) => activeSelection.includes(feature.id) || feature.id === editingFeatureId).map((feature) => feature.geometry)}
         onCoordinate={handleCoordinate}
         editorSession={editorSession}
+        draftFeatureId={editingFeatureId}
+        editingSavedFeature={editingFeatureId !== null}
         editorMode={drawing ? editorMode : null}
         onDraftGeometryChange={(geometry) => setProjectWorkspaceValue("draftGeometry", geometry)}
         onEditorModeChange={changeEditorMode}
@@ -519,11 +588,18 @@ export function ProjectWorkspace({ account }: { account: AccountProfile }) {
           </div>
 
           <div className="mt-3 space-y-2 border-t border-black/10 pt-3">
-            {!drawing ? (
+          {!drawing ? (
               <button type="button" onClick={() => startDrawing()} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0f6b5f] px-4 text-sm font-semibold text-white transition hover:bg-[#0a5049] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f6b5f]">
                 <PencilLine className="size-4" aria-hidden="true" /> Tambah {geometryLabels[activeProject.geometry_type]}
               </button>
-            ) : (
+          ) : editingFeatureId ? (
+            <div className="space-y-2">
+              <p className="rounded-lg bg-[#e7f1ef] px-3 py-2 text-sm text-[#0a5049]">Geser feature atau vertex. Tarik titik tengah untuk menambah vertex; pilih vertex lalu tekan Delete untuk menghapusnya.</p>
+              <button type="button" onClick={requestCloseForm} className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-black/15 bg-white px-3 text-sm font-semibold text-[#6b6760] transition hover:bg-[#f2f1ee] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f6b5f]">
+                <X className="size-4" aria-hidden="true" /> Batal edit
+              </button>
+            </div>
+          ) : (
               <div className="space-y-2">
                 <p className="rounded-lg bg-[#e7f1ef] px-3 py-2 text-sm text-[#0a5049]">
                   {editorMode === "select"
@@ -568,6 +644,7 @@ export function ProjectWorkspace({ account }: { account: AccountProfile }) {
             error={featuresError}
             onRetry={() => void loadFeatures(activeProject.id)}
             onFeatureSelect={(feature) => setProjectWorkspaceValue("focusGeometry", { ...feature.geometry })}
+            onFeatureEdit={startFeatureEdit}
             selectedFeatureIds={selectedFeatureIds}
             onFeatureToggle={(feature) => setProjectWorkspaceValue("selectedFeatureIds", (current) => current.includes(feature.id) ? current.filter((id) => id !== feature.id) : [...current, feature.id])}
           />
@@ -580,12 +657,26 @@ export function ProjectWorkspace({ account }: { account: AccountProfile }) {
         <FeatureInputDialog
           project={activeProject}
           values={formValues}
+          mode={editingFeatureId ? "edit" : "create"}
           submitting={submitting}
           error={formError}
           onChange={(name, value) => setFormValues((current) => ({ ...current, [name]: value }))}
-          onClose={clearDraft}
+          onClose={requestCloseForm}
           onSubmit={() => void submitFeature()}
         />
+      ) : null}
+
+      {discardEditConfirm ? (
+        <div className="fixed inset-0 z-[70] grid place-items-center bg-black/35 p-4" role="presentation">
+          <section role="alertdialog" aria-modal="true" aria-labelledby="discard-edit-title" className="w-full max-w-md rounded-2xl border border-black/10 bg-white p-5 shadow-[0_18px_50px_rgba(28,27,25,0.24)]">
+            <h2 id="discard-edit-title" className="text-lg font-semibold text-[#1c1b19]">Buang perubahan Feature?</h2>
+            <p className="mt-2 text-sm leading-5 text-[#6b6760]">Perubahan geometri dan atribut yang belum disimpan akan hilang.</p>
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button type="button" onClick={() => setDiscardEditConfirm(false)} className="min-h-11 rounded-xl px-4 text-sm font-semibold text-[#6b6760] transition hover:bg-[#f2f1ee] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f6b5f]">Lanjut edit</button>
+              <button type="button" onClick={clearDraft} className="min-h-11 rounded-xl bg-[#c0392b] px-4 text-sm font-semibold text-white transition hover:bg-[#9e2e23] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c0392b]">Buang perubahan</button>
+            </div>
+          </section>
+        </div>
       ) : null}
 
       {topologyConfirm && activeProject ? (

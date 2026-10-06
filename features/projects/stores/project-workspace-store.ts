@@ -24,6 +24,7 @@ type ProjectWorkspaceStore = ProjectWorkspaceData & {
   setValue: <K extends keyof ProjectWorkspaceData>(key: K, value: StateUpdate<ProjectWorkspaceData[K]>) => void;
   activateProject: (projectId: string) => void;
   clearDraft: () => void;
+  beginDraft: (geometry: FeatureGeometry, mode: "point" | "linestring" | "polygon" | "select") => void;
   reset: () => void;
 };
 
@@ -71,6 +72,12 @@ export const useProjectWorkspaceStore = create<ProjectWorkspaceStore>((set) => (
     drawing: false,
     editorMode: null,
     draftGeometry: null,
+    editorSession: state.editorSession + 1,
+  })),
+  beginDraft: (draftGeometry, editorMode) => set((state) => ({
+    drawing: true,
+    editorMode,
+    draftGeometry,
     editorSession: state.editorSession + 1,
   })),
   reset: () => set(initialData()),

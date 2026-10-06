@@ -8,6 +8,7 @@ import type {
   ProjectFormField,
   ProjectGeofence,
   ProjectUpdateInput,
+  UpdateFeatureInput,
 } from "../types";
 
 const API_BASE = "/api/tileserver/api/v1";
@@ -106,6 +107,18 @@ export async function createProjectFeature(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
     }),
+  );
+}
+
+export function updateProjectFeature(
+  projectId: string,
+  featureId: string,
+  input: UpdateFeatureInput,
+): Promise<ProjectFeature> {
+  return send<ProjectFeature>(
+    `/projects/${encodeURIComponent(projectId)}/features/${encodeURIComponent(featureId)}`,
+    "PATCH",
+    input,
   );
 }
 

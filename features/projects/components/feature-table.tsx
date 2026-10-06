@@ -1,6 +1,6 @@
 import { useState } from "react";
 import Button from "@/components/ui/button";
-import { ChevronLeft, ChevronRight, Crosshair, Table2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Crosshair, PencilLine, Table2 } from "lucide-react";
 import type { Project, ProjectFeature } from "../types";
 
 const PAGE_SIZE = 10;
@@ -12,6 +12,7 @@ type FeatureTableProps = {
   error: string | null;
   onRetry: () => void;
   onFeatureSelect: (feature: ProjectFeature) => void;
+  onFeatureEdit: (feature: ProjectFeature) => void;
   selectedFeatureIds: string[];
   onFeatureToggle: (feature: ProjectFeature) => void;
 };
@@ -21,7 +22,7 @@ function displayValue(value: unknown): string {
   return String(value);
 }
 
-export function FeatureTable({ project, features, loading, error, onRetry, onFeatureSelect, selectedFeatureIds, onFeatureToggle }: FeatureTableProps) {
+export function FeatureTable({ project, features, loading, error, onRetry, onFeatureSelect, onFeatureEdit, selectedFeatureIds, onFeatureToggle }: FeatureTableProps) {
   const [page, setPage] = useState(1);
   const pageCount = Math.max(1, Math.ceil(features.length / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount);
@@ -36,7 +37,7 @@ export function FeatureTable({ project, features, loading, error, onRetry, onFea
           <Table2 className="size-4 text-[#0f6b5f]" aria-hidden="true" />
           <div>
             <h2 id="feature-table-title" className="text-sm font-semibold text-[#1c1b19]">Data tersimpan</h2>
-            <p className="font-mono text-xs text-[#6b6760]">{features.length} Feature · read-only</p>
+            <p className="font-mono text-xs text-[#6b6760]">{features.length} Feature tersimpan</p>
           </div>
         </div>
         <span className="hidden text-xs text-[#6b6760] sm:inline">Centang untuk operasi · pilih Fokus untuk peta</span>
@@ -81,13 +82,14 @@ export function FeatureTable({ project, features, loading, error, onRetry, onFea
                     <td key={field.name} className="max-w-48 truncate px-4 py-2.5 text-[#1c1b19]">{displayValue(feature.attributes[field.name])}</td>
                   ))}
                   <td className="px-4 py-2.5">
-                    <button
-                      type="button"
-                      onClick={() => onFeatureSelect(feature)}
-                      className="inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-[#0f6b5f] transition hover:bg-[#e7f1ef] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f6b5f]"
-                    >
-                      <Crosshair className="size-3.5" aria-hidden="true" /> Fokus
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button type="button" onClick={() => onFeatureSelect(feature)} className="inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-[#0f6b5f] transition hover:bg-[#e7f1ef] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f6b5f]">
+                        <Crosshair className="size-3.5" aria-hidden="true" /> Fokus
+                      </button>
+                      <button type="button" onClick={() => onFeatureEdit(feature)} className="inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-[#0f6b5f] transition hover:bg-[#e7f1ef] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f6b5f]">
+                        <PencilLine className="size-3.5" aria-hidden="true" /> Edit
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
